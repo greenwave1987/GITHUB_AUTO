@@ -589,7 +589,7 @@ class AutoLogin:
             url = page.url
             
             # 检查是否已跳转到 claw.cloud
-            if 'claw.cloud' in url and 'signin' not in url.lower()and 'calback' not in url.lower():
+            if 'claw.cloud' in url and 'signin' not in url.lower()and 'callback' not in url.lower():
                 self.log(f"重定向成功:{url}", "SUCCESS")
 
                 # 检测并记录区域
