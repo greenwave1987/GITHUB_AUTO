@@ -71,8 +71,25 @@ def load_cookies():
     except Exception as e:
         print(f"❌ cookies JSON 解析失败: {e}")
         return {}
-
-
+# ================= 获取余额和已消费金额 =================
+def get_balance_info(page):
+    # 访问页面
+    page.goto("https://leaflow.net/balance")
+    
+    # 1. 定位并获取“当前余额”
+    # 使用 title 属性定位是最精确的
+    balance_locator = page.locator('p[title="点击显示完整格式"]')
+    current_balance = balance_locator.text_content()
+    
+    # 2. 定位并获取“已消费金额”
+    # 由于该元素没有 title，且类名与余额相同，可以使用文字特征或索引
+    # 这里使用 nth(1) 如果它是页面第二个匹配该类名的 p 标签
+    # 或者使用更稳健的方法：寻找不带 title 属性的那个 p 标签
+    spent_locator = page.locator('p.text-3xl.font-bold:not([title])')
+    spent_amount = spent_locator.text_content()
+    
+    print(f"当前余额: {current_balance.strip()}")
+    print(f"已消费金额: {spent_amount.strip()}")
 # ================= 单账号流程 =================
 
 def process_account(email, password, cookies_map):
@@ -91,6 +108,7 @@ def process_account(email, password, cookies_map):
             if cookies_ok(page):
                 print("✅ cookies 有效")
                 note = "cookies复用"
+                get_balance_info(page)
             else:
                 print("♻ cookies 已失效")
                 raise RuntimeError("cookies expired")
