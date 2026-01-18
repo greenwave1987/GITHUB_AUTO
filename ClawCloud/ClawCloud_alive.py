@@ -481,7 +481,7 @@ class AutoLogin:
                         self.log("已按 Enter 提交", "SUCCESS")
                     
                     time.sleep(3)
-                    page.wait_for_load_state('networkidle', timeout=60000)
+                    page.wait_for_load_state('networkidle', timeout=120000)
                     self.shot(page, "验证码提交后")
                     
                     # 检查是否通过
@@ -834,7 +834,7 @@ class AutoLogin:
                 
                 # 1. 访问 ClawCloud 登录入口
                 self.log("步骤1: 打开 ClawCloud 登录页", "STEP")
-                page.goto(SIGNIN_URL, timeout=60000)
+                page.goto(SIGNIN_URL, timeout=120000)
                 page.wait_for_load_state('networkidle', timeout=30000)
                 time.sleep(2)
                 self.shot(page, "clawcloud")
@@ -868,7 +868,7 @@ class AutoLogin:
                     sys.exit(1)
                 
                 time.sleep(3)
-                page.wait_for_load_state('networkidle', timeout=60000)
+                page.wait_for_load_state('networkidle', timeout=120000)
                 self.shot(page, "点击后")
                 
                 url = page.url
