@@ -599,6 +599,11 @@ class AutoLogin:
             
             if 'github.com/login/oauth/authorize' in url:
                 self.oauth(page)
+
+            if 'cf_chl_rt_tk' in url:
+                self.log(f"触发人机验证:{url}", "WARN")
+                self.tg.send(f"触发人机验证:{url}")
+                time.sleep(5)
             
             time.sleep(1)
             if i % 10 == 0:
