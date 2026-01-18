@@ -177,7 +177,7 @@ class AutoLogin:
         self.server = os.environ.get('PROXY')
         self.username = os.environ.get('GH_USERNAME')
         self.password = os.environ.get('GH_PASSWORD')
-        self.gh_session = os.environ.get('GH_SESSION', '').strip()
+        self.gh_session = ''##os.environ.get('GH_SESSION', '').strip()
         self.totp_secret = os.environ.get("GH_2FA_SECRET")
         self.tg = Telegram()
         self.secret = SecretUpdater()
