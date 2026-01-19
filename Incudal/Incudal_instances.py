@@ -182,7 +182,7 @@ def main():
     logger.info(f"获取到 {len(packages)} 个 package")
 
     for pkg in packages:
-        if "德国" in pkg['name']:
+        if "德国" in pkg['name'] or "法国" in pkg['name']:
             logger.info(f"🚫 跳过 packageId={pkg['id']} ({pkg['name']})")
         else:
             logger.info(f"➡️ 尝试 packageId={pkg['id']} ({pkg['name']})")
