@@ -208,7 +208,7 @@ class AutoLogin:
     def log(self, msg, level="INFO"):
         icons = {"INFO": "ℹ️", "SUCCESS": "✅", "ERROR": "❌", "WARN": "⚠️", "STEP": "🔹"}
         line = f"{icons.get(level, '•')} {msg}"
-        print(line)
+        print(line, flush=True)
         self.logs.append(line)
     
     def shot(self, page, name):
@@ -773,6 +773,7 @@ class AutoLogin:
             timeout=TIMEOUT
         )
         self.log(f"↩️ HTTP {resp.status_code}")
+
         data = self.safe_json(resp)
         if data.get("error"):
             data["message"]=data["details"]
@@ -787,6 +788,7 @@ class AutoLogin:
             code_data = data
         
         if code_data:
+
             self.log(f"🟢兑换结果： {self.decode_redeem(code_data['codeType'], code_data['codeValue'])}")  # 输出: CPU +50%
             tg_lines.append(f"🟢兑换结果： {self.decode_redeem(code_data['codeType'], code_data['codeValue'])}")
             return code_data
