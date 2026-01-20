@@ -914,7 +914,7 @@ class AutoLogin:
         with sync_playwright() as p:
             use_proxy = False
 
-            if self.server:
+            if self.server and use_proxy:
                 proxy_cfg,proxy_msg=self.pick_available_proxy()
                 
                 if proxy_cfg:
