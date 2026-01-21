@@ -68,7 +68,7 @@ def redeem(session, code, instance_id):
         code_data = data.get("todayCode") if isinstance(data.get("todayCode"), dict) else data
 
         if r.status_code == 200 and code_data and "codeType" in code_data:
-            result = f"✅ {instance_id}: {decode(code_data['codeType'], code_data['codeValue'])}"
+            result = f"✅ {instance_id}: {decode_redeem(code_data['codeType'], code_data['codeValue'])}"
             append_line(result)
             return result
         result = f"❌ {instance_id}: {data['error']}"
