@@ -141,7 +141,7 @@ jobs:
                   if remaining <= 0:
                       break
                   now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                  print(f"{now}|⏱ 监听剩余时间: {int(remaining/60)} 分钟", end="\r", flush=True)
+                  print(f"{now} |⏱ 监听剩余时间: {int(remaining/60)} 分钟", end="\r", flush=True)
                   await asyncio.sleep(60)
 
               print("\n⏰ 监听结束，发送汇总...", flush=True)
