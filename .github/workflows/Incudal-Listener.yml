@@ -39,7 +39,7 @@ jobs:
           TARGET_IDS: ${{ secrets.TARGET_IDS }}
 
           # 监听时间（秒）
-          LISTEN_SECONDS: 36000
+          LISTEN_SECONDS: 21000
 
           # 指定要使用的 TG 账号
           USE_API_ID: ${{ secrets.USE_API_ID }}
@@ -57,6 +57,7 @@ jobs:
           import re
           import subprocess
           import time
+          from datetime import datetime
           from telethon import TelegramClient, events
 
           TG_APIS = os.getenv("TG_APIS")
@@ -96,7 +97,8 @@ jobs:
               text = event.raw_text
               sender_id = str(sender.id)
 
-              print(f"收到消息 | 用户: {sender.username} | ID: {sender_id} | 内容: {text}", flush=True)
+              now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+              print(f"{now} | 用户: {sender.username} | ID: {sender_id} | 内容: {text}", flush=True)
 
               if sender_id in TARGET_IDS:
                   codes = CODE_REGEX.findall(text)
@@ -138,7 +140,8 @@ jobs:
                   remaining = LISTEN_SECONDS - elapsed
                   if remaining <= 0:
                       break
-                  print(f"⏱ 监听剩余时间: {int(remaining/60)} 分钟", end="\r", flush=True)
+                  now=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                  print(f"{now}|⏱ 监听剩余时间: {int(remaining/60)} 分钟", end="\r", flush=True)
                   await asyncio.sleep(60)
 
               print("\n⏰ 监听结束，发送汇总...", flush=True)
