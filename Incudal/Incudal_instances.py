@@ -184,12 +184,13 @@ def main():
     for pkg in packages:
         if "美国" in pkg['name'] :
             logger.info(f"➡️ 尝试 packageId={pkg['id']} ({pkg['name']})")
+            if create_instance_with_retry(session, pkg, retries=3):
+                logger.info("🎉 脚本结束（已成功创建实例）")
+                
         else:
             logger.info(f"🚫 跳过 packageId={pkg['id']} ({pkg['name']})")
     
-            if create_instance_with_retry(session, pkg, retries=3):
-                logger.info("🎉 脚本结束（已成功创建实例）")
-                return
+            
 
     logger.error("🚫 所有 package 均创建失败")
     current_hour = time.localtime().tm_hour
