@@ -39,7 +39,7 @@ jobs:
           TARGET_IDS: ${{ secrets.TARGET_IDS }}
 
           # 监听时间（秒）
-          LISTEN_SECONDS: 21000
+          LISTEN_SECONDS: 20000
 
           # 指定要使用的 TG 账号
           USE_API_ID: ${{ secrets.USE_API_ID }}
