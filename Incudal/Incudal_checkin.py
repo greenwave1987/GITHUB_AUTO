@@ -775,12 +775,14 @@ class AutoLogin:
         self.log(f"↩️ HTTP {resp.status_code}")
 
         data = self.safe_json(resp)
-        if data.get("details"):
-            data["message"]=data["details"]
+        if "details" in data:
+            data["message"] = data["details"]
             return data
-        if data.get("error"):
-            data["message"]=data["error"]
+        elif "error" in data:
+            data["message"] = data["error"]
             return data
+        else:
+            data["message"] = f"Unexpected response: {data}"
         # 示例用法
         code_data = None  # 🔹 先初始化
 
