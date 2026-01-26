@@ -22,7 +22,7 @@ tg_lines = [
     f"📅 日期：{time.strftime('%Y-%m-%d')}",
     "🖥 GitHub Actions",
 ]
-INSTANCE_IDS = {"greenwave1987":[1223, 753],"jdtaxi":[2013]}
+INSTANCE_IDS = {"greenwave1987":[1223],"jdtaxi":[2013]}
 
 TARGET_URL = "https://incudal.com"
 SIGNIN_URL = f"{TARGET_URL}/login"
