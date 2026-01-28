@@ -1,94 +1,206 @@
 import os
-import json
 import time
+import json
+import base64
+import requests
 from playwright.sync_api import sync_playwright
+from nacl import public, encoding
 
-USER = "user1"
-STATE_FILE = f"state_{USER}.json"
-GLADOS_URL = "https://glados.cloud"
+# ================= 基础配置 =================
+EMAIL = os.getenv("GLADOS_EMAIL")
+TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
+TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
-new_sessions = {}
+REPO = os.getenv("GITHUB_REPOSITORY")
+REPO_TOKEN = os.getenv("REPO_TOKEN")
+GLADOS_LOCAL = os.getenv("GLADOS_LOCAL")
 
+def die(msg):
+    raise RuntimeError(msg)
 
+# ================= GitHub Secret 更新 =================
+class SecretUpdater:
+    def __init__(self, name):
+        self.name = name
+        print(f"🔐 SecretUpdater 初始化: {name}")
+
+    def update(self, value: str):
+        if not REPO or not REPO_TOKEN:
+            print("⚠ 未配置 REPO / REPO_TOKEN，跳过 Secret 回写")
+            return
+
+        headers = {
+            "Authorization": f"token {REPO_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+
+        print("🌐 获取仓库公钥")
+        r = requests.get(
+            f"https://api.github.com/repos/{REPO}/actions/secrets/public-key",
+            headers=headers,
+            timeout=30
+        )
+        r.raise_for_status()
+        key = r.json()
+
+        pk = public.PublicKey(key["key"].encode(), encoding.Base64Encoder())
+        encrypted = public.SealedBox(pk).encrypt(value.encode())
+
+        print("📤 回写 Secret:", self.name)
+        r = requests.put(
+            f"https://api.github.com/repos/{REPO}/actions/secrets/{self.name}",
+            headers=headers,
+            json={
+                "encrypted_value": base64.b64encode(encrypted).decode(),
+                "key_id": key["key_id"]
+            },
+            timeout=30
+        )
+        r.raise_for_status()
+        print("✅ Secret 更新完成")
+
+# ================= 主逻辑 =================
 class GLaDOSAuto:
+    # ---------- Telegram ----------
+    def tg_send(self, text):
+        requests.post(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TG_CHAT_ID, "text": text},
+            timeout=10
+        )
+
+    def tg_wait_code(self, since_ts, timeout=300):
+        print("📡 等待 Telegram 新验证码")
+        offset = None
+        start = time.time()
+
+        while time.time() - start < timeout:
+            r = requests.get(
+                f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates",
+                params={"offset": offset, "timeout": 10},
+                timeout=20
+            ).json()
+
+            for item in r.get("result", []):
+                offset = item["update_id"] + 1
+                msg = item.get("message", {})
+                text = msg.get("text", "")
+                date = msg.get("date", 0)
+
+                if date <= since_ts:
+                    continue
+
+                if text.startswith("/code"):
+                    code = text.replace("/code", "").strip()
+                    if code.isdigit():
+                        print("✅ 收到【新】验证码:", code)
+                        return code
+
+            print("⌛ 未收到新验证码，5 秒后重试")
+            time.sleep(5)
+
+        die("⛔ Telegram 验证码等待超时")
+
+    # ---------- 登录判断 ----------
+    def is_logged_in(self, page) -> bool:
+        try:
+            status = page.evaluate("""
+            async () => {
+                const r = await fetch("/api/user/checkin", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ token: "glados.cloud" }),
+                    credentials: "include"
+                });
+                return r.status;
+            }
+            """)
+            return status == 200
+        except Exception:
+            return False
+
+    # ---------- 登录 ----------
+    def login(self, page):
+        print("🔐 执行验证码登录")
+        page.goto("https://glados.cloud/login")
+        page.wait_for_load_state("networkidle")
+
+        page.fill("input[type='email']", EMAIL)
+
+        send_ts = int(time.time())
+        page.locator("button").first.click()
+
+        self.tg_send(
+            "📨 GLaDOS 登录验证码已发送\n"
+            "请回复指令：\n"
+            "/code 123456"
+        )
+
+        code = self.tg_wait_code(send_ts)
+
+        page.fill("input[type='text']", code)
+        page.locator("button").nth(1).click()
+        page.wait_for_load_state("networkidle")
+
+    # ---------- 保存 state ----------
+    def save_state(self, context):
+        state = context.storage_state()
+        raw = json.dumps(state, ensure_ascii=False)
+        print("💾 更新 storage_state")
+        SecretUpdater("GLADOS_LOCAL").update(raw)
+
+    # ---------- 签到 ----------
+    def checkin(self, page):
+        print("🚀 执行签到")
+        res = page.evaluate("""
+        async () => {
+            const r = await fetch("https://glados.cloud/api/user/checkin", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ token: "glados.cloud" }),
+                credentials: "include"
+            });
+            return r.json();
+        }
+        """)
+        print("📊 签到返回:", res)
+
+    # ---------- 主入口 ----------
     def run(self):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
 
-            # 1️⃣ 使用缓存 / 新建
-            if os.path.exists(STATE_FILE):
-                context = browser.new_context(storage_state=STATE_FILE)
-                print("♻️ 使用缓存 session")
+            if GLADOS_LOCAL:
+                print("♻️ 使用缓存 storage_state")
+                context = browser.new_context(
+                    storage_state=json.loads(GLADOS_LOCAL)
+                )
             else:
-                context = browser.new_context()
                 print("🆕 新建 session")
+                context = browser.new_context()
 
             page = context.new_page()
-            page.goto(GLADOS_URL)
+            page.goto("https://glados.cloud")
             page.wait_for_load_state("networkidle")
 
-            # 2️⃣ 登录判断
             if not self.is_logged_in(page):
                 self.login(page)
+                if not self.is_logged_in(page):
+                    die("❌ 登录失败")
 
-            if not self.is_logged_in(page):
-                raise RuntimeError("❌ 登录失败")
+            # ✅ 不论哪种登录方式，都保存最新 state
+            self.save_state(context)
 
-            print("✅ 登录确认")
-
-            # 3️⃣ 签到（重点）
-            self.checkin(context)
-
-            # 4️⃣ 保存最新 session（不管新旧）
-            state = context.storage_state()
-            new_sessions[USER] = state
-
-            with open(STATE_FILE, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False)
-
-            print("💾 已更新 storage_state")
+            # ✅ 签到
+            self.checkin(page)
 
             browser.close()
 
-    def is_logged_in(self, page):
-        try:
-            page.goto(f"{GLADOS_URL}/dashboard", timeout=15000)
-            page.wait_for_selector("text=Dashboard", timeout=5000)
-            return True
-        except Exception:
-            return False
-
-    def login(self, page):
-        print("🔐 执行登录")
-        page.goto(f"{GLADOS_URL}/login")
-        page.fill("input[type=email]", os.getenv("GLADOS_EMAIL"))
-        page.click("button:has-text('Send')")
-
-        code = input("输入验证码: ")
-        page.fill("input[type=text]", code)
-        page.click("button:has-text('Login')")
-
-        page.wait_for_load_state("networkidle")
-        time.sleep(2)
-
-    def checkin(self, context):
-        print("🚀 执行签到")
-
-        resp = context.request.post(
-            "https://glados.cloud/api/user/checkin",
-            data={"token": "glados.cloud"},
-            headers={
-                "content-type": "application/json;charset=UTF-8",
-                "accept": "application/json, text/plain, */*",
-            }
-        )
-
-        data = resp.json()
-        print("📊 签到返回:", data)
-
-        if data.get("code") not in (0, 1):
-            raise RuntimeError("❌ 签到失败")
-
-
+# ================= 运行 =================
 if __name__ == "__main__":
+    if not EMAIL:
+        die("缺少 GLADOS_EMAIL")
+    if not TG_BOT_TOKEN or not TG_CHAT_ID:
+        die("缺少 Telegram 配置")
+
     GLaDOSAuto().run()
