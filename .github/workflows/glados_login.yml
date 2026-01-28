@@ -41,4 +41,4 @@ jobs:
 
       - name: 🚀 Run GLaDOS auto login & checkin
         run: |
-          python glados_login.py
+          python glados/glados_check.py
