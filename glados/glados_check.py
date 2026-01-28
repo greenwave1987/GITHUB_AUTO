@@ -157,17 +157,25 @@ class GLaDOSAuto:
 
     def checkin(self, page):
         self.log("🚀 执行签到")
-        token = page.evaluate("""() => localStorage.getItem("token")""")
-        headers = {
-            "accept": "application/json, text/plain, */*",
-            "accept-language": "zh-CN,zh;q=0.9",
-            "cache-control": "no-cache",
-            "content-type": "application/json;charset=UTF-8",
-            "pragma": "no-cache",
-        }
-        body = {"token": "glados.cloud"}
-        resp = requests.post("https://glados.cloud/api/user/checkin", headers=headers, json=body)
-        self.log(f"📊 签到返回: {resp.json()}")
+        result = page.evaluate("""
+            async () => {
+                const res = await fetch("https://glados.cloud/api/user/checkin", {
+                    method: "POST",
+                    headers: {
+                        "accept": "application/json, text/plain, */*",
+                        "accept-language": "zh-CN,zh;q=0.9",
+                        "cache-control": "no-cache",
+                        "content-type": "application/json;charset=UTF-8",
+                        "pragma": "no-cache",
+                    },
+                    body: JSON.stringify({token: "glados.cloud"}),
+                    credentials: "include"
+                });
+                return await res.json();
+            }
+        """)
+        self.log(f"📊 签到返回: {result}")
+    
 
     def run(self):
         self.log("STEP 1: 启动 Playwright")
