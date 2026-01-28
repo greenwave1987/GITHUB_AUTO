@@ -9,9 +9,9 @@ from playwright.sync_api import sync_playwright
 # ===== 配置 =====
 REPO = os.getenv("GITHUB_REPOSITORY")
 REPO_TOKEN = os.getenv("REPO_TOKEN")
-STORAGE_FILE = "glados_storage.json"
 TG_BOT = os.getenv("TG_BOT")       # Telegram Bot Token
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")  # Telegram Chat ID
+SECRET_NAME = "GLADOS_LOCAL"
 
 # ===== 工具函数 =====
 def die(msg):
@@ -38,7 +38,7 @@ class SecretUpdater:
         pk = public.PublicKey(key["key"].encode(), encoding.Base64Encoder())
         encrypted = public.SealedBox(pk).encrypt(value.encode())
         r = requests.put(
-            f"https://api.github.com/repos/{REPO}/actions/secrets/{self.name}",
+            f"https://api.github.com/repos/{REPO}/actions/secrets/{SECRET_NAME}",
             headers=headers,
             json={
                 "encrypted_value": b64encode(encrypted).decode(),
@@ -78,24 +78,31 @@ def parse_checkin(resp_json):
             return f"checkin:{date} | 获得 {int(gain)} | 总积分 {int(total)}"
     return resp_json.get("message", "未知签到结果")
 
-# ===== GLaDOS 自动化 =====
+# ===== 主流程 =====
 def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = None
-        # 尝试使用缓存
-        if os.path.exists(STORAGE_FILE):
-            print("♻️ 使用缓存 session")
-            context = browser.new_context(storage_state=STORAGE_FILE)
+
+        # ===== 尝试从 Secret 注入 storage_state =====
+        storage_state = os.getenv(SECRET_NAME)
+        if storage_state:
+            try:
+                storage_json = json.loads(storage_state)
+                print("♻️ 使用 Secret 注入 session")
+                context = browser.new_context(storage_state=storage_json)
+            except Exception as e:
+                print(f"⚠ Secret 解码失败，将重新登录: {e}")
+                context = browser.new_context()
         else:
-            print("🆕 新建 session")
+            print("⚠ Secret 不存在，将重新登录")
             context = browser.new_context()
 
         page = context.new_page()
         page.goto("https://glados.cloud/login")
 
         # ===== 登录流程 =====
-        if not os.path.exists(STORAGE_FILE):
+        if not storage_state:
             print("🔐 执行登录")
             page.click("button:has-text('Send')")
             # 轮询 Telegram 验证码
@@ -115,20 +122,13 @@ def run():
             print(f"✅ 收到验证码: {code}")
             page.fill("input[type=tel]", code)
             page.click("button:has-text('Login')")
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
             print("✅ 登录完成")
-            # 保存 storage_state
-            context.storage_state(path=STORAGE_FILE)
-        else:
-            print("✅ 使用缓存登录成功")
 
-        # 打印 storage_state
-        with open(STORAGE_FILE, "r", encoding="utf-8") as f:
-            storage_json = json.load(f)
+        # ===== 保存 storage_state 并回写 Secret =====
+        storage_json = context.storage_state()
         print("💾 当前 storage_state:", json.dumps(storage_json, indent=2, ensure_ascii=False))
-
-        # 更新 Secret
-        secret = SecretUpdater("GLADOS_LOCAL")
+        secret = SecretUpdater(SECRET_NAME)
         secret.update(json.dumps(storage_json))
 
         # ===== 提取 cookies =====
