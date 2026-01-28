@@ -1,53 +1,75 @@
 import os
 import time
+import sys
 import json
 import base64
 import requests
 from playwright.sync_api import sync_playwright
 
+sys.stdout.reconfigure(line_buffering=True)
+
 EMAIL = os.getenv("GLADOS_EMAIL")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 GLADOS_LOCAL = os.getenv("GLADOS_LOCAL")
+REPO_TOKEN = os.getenv("REPO_TOKEN")
+GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")
 
 def die(msg):
     raise RuntimeError(msg)
+
+for k, v in {
+    "GLADOS_EMAIL": EMAIL,
+    "TG_BOT_TOKEN": TG_BOT_TOKEN,
+    "TG_CHAT_ID": TG_CHAT_ID,
+    "REPO_TOKEN": REPO_TOKEN,
+    "GITHUB_REPOSITORY": GITHUB_REPOSITORY,
+}.items():
+    if not v:
+        die(f"❌ 缺少环境变量 {k}")
 
 class GLaDOSAuto:
     def log(self, msg):
         print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
-    # ---------- Telegram ----------
+    # ---------------- Telegram ----------------
     def tg_send(self, text):
-        url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={
-            "chat_id": TG_CHAT_ID,
-            "text": text
-        }, timeout=10)
+        r = requests.post(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TG_CHAT_ID, "text": text},
+            timeout=10
+        )
+        if r.status_code != 200:
+            die("❌ Telegram 消息发送失败")
 
-    def tg_wait_code(self, after_ts, timeout=300):
-        self.log("📡 等待 Telegram 新验证码")
+    def tg_wait_code(self, timeout=300):
+        notify_ts = int(time.time())
+
+        self.tg_send(
+            "📨 GLaDOS 登录验证码已发送\n"
+            "请回复指令：\n"
+            "/code 123456"
+        )
 
         offset = None
         start = time.time()
 
         while time.time() - start < timeout:
-            resp = requests.get(
+            r = requests.get(
                 f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates",
                 params={"offset": offset, "timeout": 10},
                 timeout=15
             ).json()
 
-            self.log(f"📥 TG updates raw: {resp}")
+            self.log(f"📥 TG updates raw: {r}")
 
-            for item in resp.get("result", []):
+            for item in r.get("result", []):
                 offset = item["update_id"] + 1
                 msg = item.get("message", {})
                 text = msg.get("text", "")
-                date = msg.get("date", 0)
+                msg_time = msg.get("date", 0)
 
-                # ⭐ 关键：只接受「发送 Get Code 之后」的消息
-                if date <= after_ts:
+                if msg_time <= notify_ts:
                     continue
 
                 if text.startswith("/code"):
@@ -59,96 +81,122 @@ class GLaDOSAuto:
             self.log("⌛ 未收到新验证码，5 秒后重试")
             time.sleep(5)
 
-        die("⛔ Telegram 验证码超时")
+        die("⛔ 等待 Telegram 验证码超时")
 
-    # ---------- localStorage ----------
+    # ---------------- GitHub Secret ----------------
+    def save_secret(self, name, value):
+        owner, repo = GITHUB_REPOSITORY.split("/")
+        api = f"https://api.github.com/repos/{owner}/{repo}/actions/secrets"
+        headers = {
+            "Authorization": f"Bearer {REPO_TOKEN}",
+            "Accept": "application/vnd.github+json"
+        }
+
+        r = requests.get(f"{api}/public-key", headers=headers)
+        if r.status_code != 200:
+            die("❌ 获取 GitHub public-key 失败")
+
+        key = r.json()["key"]
+        key_id = r.json()["key_id"]
+
+        from nacl import public, encoding
+        pk = public.PublicKey(key.encode(), encoding.Base64Encoder())
+        sealed = public.SealedBox(pk).encrypt(value.encode())
+        encrypted = base64.b64encode(sealed).decode()
+
+        r = requests.put(
+            f"{api}/{name}",
+            headers=headers,
+            json={"encrypted_value": encrypted, "key_id": key_id}
+        )
+
+        if r.status_code not in (201, 204):
+            die(f"❌ 写入 Secret 失败: {r.text}")
+
+        self.log("🔐 GLADOS_LOCAL 已更新到 GitHub Secrets")
+
+    # ---------------- Playwright ----------------
     def inject_local(self, page):
-        if not GLADOS_LOCAL:
-            return False
-
-        data = json.loads(base64.b64decode(GLADOS_LOCAL).decode())
+        raw = base64.b64decode(GLADOS_LOCAL).decode()
+        data = json.loads(raw)
 
         page.add_init_script("""
             (data) => {
-                for (const k in data) {
-                    localStorage.setItem(k, data[k]);
+                for (const [k, v] of Object.entries(data)) {
+                    localStorage.setItem(k, v);
                 }
             }
         """, data)
 
-        self.log("♻️ 已注入 GLADOS_LOCAL")
-        return True
+    def export_and_save_local(self, page):
+        self.log("💾 导出并保存最新 localStorage")
+        raw = page.evaluate("() => JSON.stringify(localStorage)")
+        encoded = base64.b64encode(raw.encode()).decode()
+        self.save_secret("GLADOS_LOCAL", encoded)
 
-    def save_local(self, page):
-        data = page.evaluate("""
-            () => {
-                const o = {};
-                for (let i = 0; i < localStorage.length; i++) {
-                    const k = localStorage.key(i);
-                    o[k] = localStorage.getItem(k);
-                }
-                return o;
-            }
-        """)
-
-        if not data:
-            die("❌ localStorage 为空")
-
-        encoded = base64.b64encode(
-            json.dumps(data, ensure_ascii=False).encode()
-        ).decode()
-
-        self.log("✅ 登录态已生成，请保存到 GLADOS_LOCAL")
-        print(encoded)
-
-    # ---------- 主流程 ----------
+    # ---------------- 主流程 ----------------
     def run(self):
+        self.log("STEP 1: 启动 Playwright")
+
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
-            page = context.new_page()
+            page = browser.new_page()
 
-            # ① 尝试复用登录态
-            used = self.inject_local(page)
-            page.goto("https://glados.cloud", timeout=60000)
-            time.sleep(3)
+            try:
+                if GLADOS_LOCAL:
+                    self.log("♻️ 尝试使用缓存登录")
+                    self.inject_local(page)
+                    page.goto("https://glados.cloud/console", timeout=60000)
+                    time.sleep(3)
 
-            if used and "login" not in page.url.lower():
-                self.log("🎉 使用缓存登录成功")
-                return
+                    if page.url.startswith("https://glados.cloud/console"):
+                        self.log("✅ 缓存登录成功")
+                        self.export_and_save_local(page)
+                        self.checkin(page)
+                        return
 
-            self.log("➡️ 需要验证码登录")
+                    self.log("⚠️ 缓存失效，回退验证码登录")
 
-            # ② 请求验证码
-            page.goto("https://glados.cloud/login")
-            page.fill("#email", EMAIL)
+                self.login_with_code(page)
+                self.export_and_save_local(page)
+                self.checkin(page)
 
-            send_ts = int(time.time())
-            page.click("button:has-text('Get Code')")
-            self.log("📨 已请求验证码")
+            finally:
+                browser.close()
 
-            self.tg_send(
-                "📨 GLaDOS 登录验证码已发送\n"
-                "请回复：\n"
-                "/code 123456"
-            )
+    def login_with_code(self, page):
+        self.log("STEP 2: 打开登录页")
+        page.goto("https://glados.cloud/login", timeout=60000)
 
-            # ③ 等验证码
-            code = self.tg_wait_code(send_ts)
+        self.log("STEP 3: 输入邮箱")
+        page.fill("input#email", EMAIL)
 
-            # ④ 提交验证码
-            page.fill("#mailcode", code)
-            page.click("button:has-text('Login')")
+        self.log("STEP 4: 点击 Get Code")
+        page.click("button:has-text('Get Code')")
+        time.sleep(3)
 
-            # ⑤ 等 localStorage 写入
-            for _ in range(10):
-                if page.evaluate("() => localStorage.length") > 0:
-                    self.save_local(page)
-                    self.log("🎉 登录成功")
-                    return
-                page.wait_for_timeout(1000)
+        code = self.tg_wait_code()
 
-            die("❌ 登录失败：localStorage 未生成")
+        self.log("STEP 5: 填入验证码")
+        page.fill("input#mailcode", code)
+
+        self.log("STEP 6: 点击 Login")
+        page.click("button:has-text('Login')")
+        page.wait_for_url("**/console", timeout=30000)
+
+        self.log("✅ 验证码登录成功")
+
+    def checkin(self, page):
+        self.log("🚀 执行签到")
+        result = page.evaluate("""
+            () => fetch("https://glados.cloud/api/user/checkin", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ token: "glados.cloud" }),
+                credentials: "include"
+            }).then(r => r.json())
+        """)
+        self.log(f"📊 签到结果: {result}")
 
 if __name__ == "__main__":
     GLaDOSAuto().run()
