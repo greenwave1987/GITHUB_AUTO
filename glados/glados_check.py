@@ -68,7 +68,7 @@ def inject_local(page, local_data):
 def check_console_valid(page):
     print("[STEP] 访问控制台校验 session")
     page.goto(CONSOLE_URL, timeout=30000)
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(30000)
     ok = "当前套餐是" in page.content()
     print(f"[RESULT] 控制台校验结果: {'有效' if ok else '无效'}")
     return ok
