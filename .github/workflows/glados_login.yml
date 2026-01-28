@@ -3,7 +3,7 @@ name: GLaDOS Auto Checkin
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 3 * * *"   # 每天 UTC 03:00（你可自己改）
+    - cron: "0 3 * * *"
 
 jobs:
   glados:
@@ -13,25 +13,15 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      - name: Upgrade pip
+      - name: Install deps
         run: |
           python -u -m pip install --upgrade pip
-
-      - name: Install Python dependencies
-        run: |
-          if [ -f requirements.txt ]; then
-            python -u -m pip install -r requirements.txt
-          else
-            python -u -m pip install playwright requests
-          fi
-
-      - name: Install Playwright Chromium
-        run: |
+          python -u -m pip install playwright requests pynacl
           python -u -m playwright install chromium
 
       - name: Run GLaDOS auto login & checkin
@@ -40,5 +30,7 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           GLADOS_LOCAL: ${{ secrets.GLADOS_LOCAL }}
+          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python -u glados/glados_check.py
