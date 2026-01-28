@@ -6,6 +6,7 @@ from playwright.sync_api import sync_playwright
 
 LOGIN_URL = "https://glados.cloud/login"
 CONSOLE_URL = "https://glados.cloud/console"
+POINTS_API = "https://glados.cloud/api/user/points"
 CHECKIN_API = "https://glados.cloud/api/user/checkin"
 
 EMAIL = os.environ["GLADOS_EMAIL"]
@@ -52,7 +53,11 @@ def update_secret(name, value):
         "Authorization": f"token {REPO_TOKEN}",
         "Accept": "application/vnd.github+json"
     }
-    r = requests.put(api, headers=headers, json={"encrypted_value": value, "key_id": "dummy"})
+    r = requests.put(
+        api,
+        headers=headers,
+        json={"encrypted_value": value, "key_id": "dummy"}
+    )
     print(f"[RESULT] Secret 更新状态码: {r.status_code}")
 
 def inject_local(page, local_data):
@@ -65,13 +70,28 @@ def inject_local(page, local_data):
     )
     print(f"[OK] 注入 localStorage 条目数: {len(local_data)}")
 
-def check_console_valid(page):
-    print("[STEP] 访问控制台校验 session")
-    page.goto(CONSOLE_URL, timeout=30000)
-    page.wait_for_timeout(30000)
-    ok = "当前套餐是" in page.content()
-    print(f"[RESULT] 控制台校验结果: {'有效' if ok else '无效'}")
-    return ok
+# 🔥 新的 session 校验逻辑（points API）
+def check_session_by_points(page):
+    print("[STEP] 使用 /api/user/points 校验 session")
+    try:
+        result = page.evaluate(
+            f"""async () => {{
+                const r = await fetch("{POINTS_API}", {{
+                    method: "GET",
+                    credentials: "include"
+                }});
+                if (!r.ok) return null;
+                return await r.json();
+            }}"""
+        )
+        if result and isinstance(result, dict):
+            print(f"[OK] session 有效，points 返回: {result}")
+            return True
+        print("[RESULT] session 无效（无返回数据）")
+        return False
+    except Exception as e:
+        print(f"[ERROR] points 校验异常: {e}")
+        return False
 
 def save_screenshot(page, name):
     print(f"[STEP] 保存截图: {name}")
@@ -97,6 +117,7 @@ def login_flow(page):
     page.click("button:has-text('Get Code')")
 
     code = tg_wait_code()
+
     print(f"[STEP] 输入验证码: {code}")
     page.fill("#mailcode", code)
 
@@ -131,7 +152,7 @@ def run():
         if local_raw:
             print("[INFO] 检测到 GLADOS_LOCAL，尝试复用 session")
             inject_local(page, json.loads(local_raw))
-            if check_console_valid(page):
+            if check_session_by_points(page):
                 tg_send("✅ 使用已有 session 成功")
             else:
                 tg_send("❌ session 无效，重新登录")
@@ -141,10 +162,10 @@ def run():
             tg_send("❌ 无 session，执行登录")
             login_flow(page)
 
-        print("[STEP] 最终校验控制台")
-        if not check_console_valid(page):
+        print("[STEP] 最终 session 校验")
+        if not check_session_by_points(page):
             save_screenshot(page, "login_failed")
-            die("❌ 登录失败，未进入控制台")
+            die("❌ 登录失败，points 校验未通过")
 
         save_screenshot(page, "login_success")
 
