@@ -116,7 +116,7 @@ class GLaDOSAuto:
         page.screenshot(path=f"{name}.png")
 
     def is_logged_in(self, page):
-        token = page.evaluate("""() => localStorage.getItem("token")""")
+        token = page.evaluate("""() => localStorage.getItem("user_id")""")
         return token is not None
 
     def inject_local(self, page, storage_state):
@@ -146,7 +146,7 @@ class GLaDOSAuto:
 
         self.log("⏳ 等待登录完成")
         for i in range(30):
-            token = page.evaluate("""() => localStorage.getItem("token")""")
+            token = page.evaluate("""() => localStorage.getItem("user_id")""")
             if token:
                 self.log("✅ 登录成功")
                 return
