@@ -191,10 +191,10 @@ def run():
             page.goto(CONSOLE_URL)
             page.wait_for_load_state("networkidle", timeout=60000)
             time.sleep(5)
+            save_screenshot(page, "session_info")
             
-            if "login" in page.url.lower():
-                print(f"当前 url:{page.url}")
-                save_screenshot(page, "session_failed")
+            print(f"当前 url:{page.url}")
+
             
             if check_session_by_points(page):
                 tg_send("✅ 使用已有 session 成功")
