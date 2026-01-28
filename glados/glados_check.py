@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 # ---------- 配置与常量 ----------
 LOGIN_URL = "https://glados.cloud/login"
-CONSOLE_URL = "https://glados.cloud/console"
+CONSOLE_URL = "https://glados.cloud/console/account"
 POINTS_API = "https://glados.cloud/api/user/points"
 CHECKIN_API = "https://glados.cloud/api/user/checkin"
 
@@ -193,9 +193,8 @@ def run():
             time.sleep(5)
             save_screenshot(page, "session_info")
             
-            print(f"当前 url:{page.url}")
-
-            
+            print(f"[INFO] 当前 url:{page.url}")
+ 
             if check_session_by_points(page):
                 tg_send("✅ 使用已有 session 成功")
             else:
