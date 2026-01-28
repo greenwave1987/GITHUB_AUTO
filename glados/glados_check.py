@@ -43,17 +43,31 @@ class GLaDOSAuto:
 
     def tg_wait_code(self, timeout=300):
         self.log("📡 开始轮询 Telegram 验证码")
-        self.tg_send(
-            "📨 GLaDOS 登录验证码已发送\n"
-            "请回复指令：\n"
-            "/code 123456"
-        )
+
+        # 1️⃣ 发送提示消息，并记录它的 date
+        resp = requests.post(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": TG_CHAT_ID,
+                "text": (
+                    "📨 GLaDOS 登录验证码已发送\n"
+                    "请回复指令：\n"
+                    "/code 123456"
+                )
+            },
+            timeout=10
+        ).json()
+
+        if not resp.get("ok"):
+            die("❌ Telegram 提示消息发送失败")
+
+        notice_date = resp["result"]["date"]
+        self.log(f"🕒 TG 提示消息时间戳: {notice_date}")
 
         offset = None
         start = time.time()
 
         while time.time() - start < timeout:
-            # 获取更新
             resp = requests.get(
                 f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates",
                 params={"offset": offset, "timeout": 10},
@@ -63,20 +77,31 @@ class GLaDOSAuto:
             self.log(f"📥 TG updates raw: {resp}")
 
             for item in resp.get("result", []):
-                # 更新 offset, 避免重复处理相同的消息
                 offset = item["update_id"] + 1
-                msg = item.get("message", {}).get("text", "")
 
-                if msg.startswith("/code"):
-                    code = msg.replace("/code", "").strip()
+                msg = item.get("message", {})
+                text = msg.get("text", "")
+                msg_date = msg.get("date", 0)
+
+                # 2️⃣ 丢弃提示消息之前的所有消息
+                if msg_date <= notice_date:
+                    self.log(
+                        f"⏭️ 忽略旧消息 date={msg_date} <= notice_date={notice_date}"
+                    )
+                    continue
+
+                # 3️⃣ 只接受新消息里的 /code
+                if text.startswith("/code"):
+                    code = text.replace("/code", "").strip()
                     if code.isdigit():
-                        self.log(f"✅ 收到验证码: {code}")
+                        self.log(f"✅ 收到【新】验证码: {code}")
                         return code
 
-            self.log("⌛ 仍未收到验证码，5 秒后重试")
+            self.log("⌛ 未收到新验证码，5 秒后重试")
             time.sleep(5)
 
         die("⛔ Telegram 验证码等待超时")
+
 
     # ---------- 主流程 ----------
 
