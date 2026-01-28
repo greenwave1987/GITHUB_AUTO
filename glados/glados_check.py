@@ -50,7 +50,7 @@ class SecretUpdater:
     def __init__(self, name):
         self.name = name
         self.repo = os.getenv("GITHUB_REPOSITORY")
-        self.token = os.getenv("GITHUB_TOKEN")
+        self.token = os.getenv("REPO_TOKEN")
         if not self.repo or not self.token:
             die("❌ 缺少 GITHUB_REPOSITORY 或 GITHUB_TOKEN")
 
