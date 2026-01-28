@@ -19,31 +19,56 @@ def die(msg):
     tg_send(msg)
     raise RuntimeError(msg)
 
-def tg_send(text):
-    print(f"[TG] {text}")
-    requests.post(
-        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-        json={"chat_id": TG_CHAT_ID, "text": text}
+def tg_send( text):
+    print(f"[STEP] 📤 尝试发送 Telegram 消息")
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    resp = requests.post(url, json={
+        "chat_id": TG_CHAT_ID,
+        "text": text
+    }, timeout=10)
+
+    print(f"[STEP] 📬 TG HTTP 状态码: {resp.status_code}")
+    print(f"[STEP] 📬 TG 返回内容: {resp.text}")
+
+    if resp.status_code != 200:
+        die("❌ Telegram 消息发送失败（见上方返回）")
+
+def tg_wait_code( timeout=300):
+    print(f"[STEP] 📡 开始轮询 Telegram 验证码")
+    tg_send(
+        "📨 GLaDOS 登录验证码已发送\n"
+        "请回复指令：\n"
+        "/code 123456"
     )
 
-def tg_wait_code():
-    print("[STEP] 等待 TG 输入邮箱验证码")
-    tg_send("📩 请回复 **邮箱验证码**")
     offset = None
-    while True:
-        r = requests.get(
-            f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates",
-            params={"offset": offset, "timeout": 60}
+    start = time.time()
+
+    while time.time() - start < timeout:
+        # 获取更新
+        resp = requests.get(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates",
+            params={"offset": offset, "timeout": 10},
+            timeout=15
         ).json()
-        for u in r.get("result", []):
-            offset = u["update_id"] + 1
-            if "text" in u.get("message", {}):
-                code = u["message"]["text"].strip()
-                print(f"[TG] 收到消息: {code}")
+
+        print(f"[STEP] 📥 TG updates raw: {resp}")
+
+        for item in resp.get("result", []):
+            # 更新 offset, 避免重复处理相同的消息
+            offset = item["update_id"] + 1
+            msg = item.get("message", {}).get("text", "")
+
+            if msg.startswith("/code"):
+                code = msg.replace("/code", "").strip()
                 if code.isdigit():
-                    print("[OK] 验证码格式正确")
+                    print(f"[STEP] ✅ 收到验证码: {code}")
                     return code
-        time.sleep(2)
+
+        print(f"[STEP] ⌛ 仍未收到验证码，5 秒后重试")
+        time.sleep(5)
+
+    die("⛔ Telegram 验证码等待超时")
 
 def update_secret(name, value):
     print(f"[STEP] 更新 GitHub Secret: {name}")
