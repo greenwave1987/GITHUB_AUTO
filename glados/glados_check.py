@@ -84,7 +84,7 @@ class GLaDOSAuto:
                 f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates",
                 params={"timeout": 10}, timeout=15
             ).json()
-            self.log(f"📥 TG updates raw: {resp}")
+            #self.log(f"📥 TG updates raw: {resp}")
 
             for item in resp.get("result", []):
                 msg = item.get("message", {})
