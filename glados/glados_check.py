@@ -91,25 +91,32 @@ def has_valid_cookie(context):
     return any("koa:sess" in c["name"] for c in cookies)
 
 
-def click_send_code(page):
-    # 等待按钮出现，支持 iframe
-    try:
-        # 先找 main page
-        btn = page.locator("button:has-text('Send Code'), button:has-text('发送')")
-        btn.wait_for(state="visible", timeout=15000)
-        btn.click()
-        return
-    except TimeoutError:
-        # iframe 尝试
-        for f in page.frames:
+def click_send_code(page, retries=5):
+    for attempt in range(retries):
+        log(f"🔎 尝试点击发送验证码按钮，第 {attempt+1}/{retries} 次")
+        # 先在主页面查找
+        btns = page.locator("button:has-text('Send Code'), button:has-text('发送验证码'), button:has-text('发送')")
+        if btns.count() > 0:
             try:
-                btn = f.locator("button:has-text('Send Code'), button:has-text('发送')")
-                btn.wait_for(state="visible", timeout=5000)
-                btn.click()
+                btns.first.click(timeout=5000)
+                log("✅ 点击发送验证码按钮成功")
                 return
             except TimeoutError:
-                continue
+                pass
+        # 再尝试 iframe
+        for f in page.frames:
+            btns = f.locator("button:has-text('Send Code'), button:has-text('发送验证码'), button:has-text('发送')")
+            if btns.count() > 0:
+                try:
+                    btns.first.click(timeout=5000)
+                    log("✅ iframe 内点击发送验证码按钮成功")
+                    return
+                except TimeoutError:
+                    continue
+        # 等待 2 秒后重试
+        time.sleep(2)
     die("❌ 找不到发送验证码按钮")
+
 
 
 # ---------------- Checkin ----------------
