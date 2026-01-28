@@ -1,210 +1,111 @@
 import os
-import re
 import time
-import json
-import base64
-import requests
-from playwright.sync_api import sync_playwright
+import sys
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
+# ---- 强制 stdout 实时输出 ----
+sys.stdout.reconfigure(line_buffering=True)
 
-LOGIN_URL = "https://glados.cloud/login"
-CHECKIN_API = "https://glados.cloud/api/user/checkin"
-CODE_WAIT = 180
+EMAIL = os.getenv("GLADOS_EMAIL")
+PASSWORD = os.getenv("GLADOS_PASSWORD")
 
+if not EMAIL or not PASSWORD:
+    raise RuntimeError("缺少环境变量 GLADOS_EMAIL / GLADOS_PASSWORD")
 
-# ================= Telegram =================
-
-class Telegram:
-    def __init__(self):
-        self.token = os.environ.get("TG_BOT_TOKEN")
-        self.chat_id = os.environ.get("TG_CHAT_ID")
-        self.ok = bool(self.token and self.chat_id)
-
-    def send(self, msg):
-        if not self.ok:
-            return
-        try:
-            requests.post(
-                f"https://api.telegram.org/bot{self.token}/sendMessage",
-                data={"chat_id": self.chat_id, "text": msg},
-                timeout=20
-            )
-        except:
-            pass
-
-    def wait_code(self, timeout=180):
-        if not self.ok:
-            return None
-
-        offset = 0
-        pattern = re.compile(r"^/code\s+(\d{4,8})$")
-        end = time.time() + timeout
-
-        while time.time() < end:
-            try:
-                r = requests.get(
-                    f"https://api.telegram.org/bot{self.token}/getUpdates",
-                    params={"timeout": 20, "offset": offset},
-                    timeout=30
-                )
-                data = r.json()
-                if not data.get("ok"):
-                    continue
-
-                for upd in data.get("result", []):
-                    offset = upd["update_id"] + 1
-                    msg = upd.get("message", {})
-                    if str(msg.get("chat", {}).get("id")) != str(self.chat_id):
-                        continue
-
-                    text = (msg.get("text") or "").strip()
-                    m = pattern.match(text)
-                    if m:
-                        return m.group(1)
-            except:
-                pass
-
-            time.sleep(2)
-
-        return None
-
-
-# ================= GitHub Secret =================
-
-class SecretUpdater:
-    def __init__(self):
-        self.token = os.environ.get("REPO_TOKEN")
-        self.repo = os.environ.get("GITHUB_REPOSITORY")
-        self.ok = bool(self.token and self.repo)
-
-    def update(self, name, value):
-        if not self.ok:
-            return False
-
-        try:
-            from nacl import public, encoding
-
-            headers = {
-                "Authorization": f"token {self.token}",
-                "Accept": "application/vnd.github+json"
-            }
-
-            r = requests.get(
-                f"https://api.github.com/repos/{self.repo}/actions/secrets/public-key",
-                headers=headers, timeout=20
-            )
-            key = r.json()
-            pk = public.PublicKey(key["key"].encode(), encoding.Base64Encoder())
-            encrypted = public.SealedBox(pk).encrypt(value.encode())
-
-            r = requests.put(
-                f"https://api.github.com/repos/{self.repo}/actions/secrets/{name}",
-                headers=headers,
-                json={
-                    "encrypted_value": base64.b64encode(encrypted).decode(),
-                    "key_id": key["key_id"]
-                },
-                timeout=20
-            )
-            return r.status_code in (201, 204)
-        except:
-            return False
-
-
-# ================= 主逻辑 =================
 
 class GLaDOSAuto:
-    def __init__(self):
-        self.email = os.environ.get("GLADOS_EMAIL")
-        self.tg = Telegram()
-        self.secret = SecretUpdater()
+
+    def log(self, msg):
+        print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
     def run(self):
-        if not self.email:
-            raise RuntimeError("缺少 GLADOS_EMAIL")
+        self.log("STEP 1: 启动浏览器")
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-blink-features=AutomationControlled"
-                ]
-            )
-            ctx = browser.new_context()
-            page = ctx.new_page()
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
 
-            # 反检测
-            page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            """)
+            try:
+                self.login(page)
+                self.checkin(page)
+                self.log("✅ 全流程完成")
+            finally:
+                browser.close()
 
-            # 1️⃣ 打开登录页
-            page.goto(LOGIN_URL, timeout=60000)
-            page.wait_for_selector("#email")
+    # ---------------- 登录 ----------------
+    def login(self, page):
+        self.log("STEP 2: 打开登录页")
+        page.goto("https://glados.network/login", timeout=60000)
 
-            # 2️⃣ 输入邮箱
-            page.fill("#email", self.email)
-            time.sleep(0.5)
+        self.log("STEP 3: 输入邮箱 & 密码")
+        page.fill("input[type=email]", EMAIL)
+        page.fill("input[type=password]", PASSWORD)
 
-            # 3️⃣ Get Code
-            page.click('button:has-text("Get Code")')
+        self.log("STEP 4: 点击登录")
+        page.click("button[type=submit]")
 
-            self.tg.send(
-                "📧 <b>GLaDOS 登录</b>\n\n"
-                "验证码已发送，请在 Telegram 发送：\n"
-                "/code 123456"
-            )
+        time.sleep(3)
 
-            # 4️⃣ 等验证码
-            code = self.tg.wait_code(CODE_WAIT)
-            if not code:
-                raise RuntimeError("验证码超时")
+        self.log(f"当前 URL: {page.url}")
 
-            # 5️⃣ 输入验证码
-            page.fill("#mailcode", code)
-            time.sleep(0.5)
+        # ✅ 正确判断：localStorage token
+        token = page.evaluate("""
+            () => localStorage.getItem("token") 
+               || localStorage.getItem("user")
+        """)
 
-            # 6️⃣ Login
-            page.click('button:has-text("Login")')
-            page.wait_for_load_state("domcontentloaded")
-            time.sleep(2)
+        if not token:
+            self.dump_debug(page, "login_failed")
+            raise RuntimeError("登录失败：localStorage 未生成 token")
 
-            if "/login" in page.url:
-                raise RuntimeError("登录失败")
+        self.log("✅ 登录成功（检测到 localStorage token）")
 
-            # 7️⃣ 读取 localStorage
-            local_data = page.evaluate("""
-            () => {
-                let data = {};
-                for (let i = 0; i < localStorage.length; i++) {
-                    let k = localStorage.key(i);
-                    data[k] = localStorage.getItem(k);
-                }
-                return data;
-            }
-            """)
+    # ---------------- 签到 ----------------
+    def checkin(self, page):
+        self.log("STEP 5: 打开签到页面")
+        page.goto("https://glados.network/console/checkin", timeout=60000)
 
-            # 保存 localStorage
-            self.secret.update("GLADOS_LOCALSTORAGE", json.dumps(local_data))
-            self.tg.send("🔐 登录成功，localStorage 已保存")
+        try:
+            self.log("STEP 6: 等待签到按钮")
+            page.wait_for_selector("button", timeout=10000)
+        except PlaywrightTimeout:
+            self.dump_debug(page, "checkin_page_timeout")
+            raise RuntimeError("签到页加载失败")
 
-            # 8️⃣ 签到（在浏览器上下文中 fetch）
-            res = page.evaluate(f"""
-            () => fetch("{CHECKIN_API}", {{
-                method: "POST",
-                credentials: "include",
-                headers: {{
-                    "content-type": "application/json;charset=UTF-8"
-                }},
-                body: JSON.stringify({{ token: "glados.cloud" }})
-            }}).then(r => r.json())
-            """)
+        text = page.inner_text("body")
 
-            self.tg.send(f"✅ 签到结果:\n{json.dumps(res, indent=2)}")
-            print("签到结果:", res)
+        if "Checked" in text or "已签到" in text:
+            self.log("🎉 今日已签到")
+            return
 
-            browser.close()
+        self.log("STEP 7: 点击签到按钮")
+        page.click("button")
+
+        time.sleep(2)
+
+        self.log("STEP 8: 校验签到结果")
+        text = page.inner_text("body")
+
+        if "success" in text.lower() or "已签到" in text:
+            self.log("🎉 签到成功")
+        else:
+            self.dump_debug(page, "checkin_failed")
+            raise RuntimeError("签到失败")
+
+    # ---------------- Debug dump ----------------
+    def dump_debug(self, page, name):
+        self.log(f"❌ 失败，开始 dump 调试信息: {name}")
+
+        html_path = f"{name}.html"
+        png_path = f"{name}.png"
+
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(page.content())
+
+        page.screenshot(path=png_path)
+
+        self.log(f"已保存 {html_path}")
+        self.log(f"已保存 {png_path}")
 
 
 if __name__ == "__main__":
