@@ -1,0 +1,44 @@
+name: GLaDOS Auto Login & Checkin
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每天 9:00 UTC（北京时间 17:00）
+    - cron: "0 9 * * *"
+
+jobs:
+  glados:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # ===== GLaDOS =====
+      GLADOS_EMAIL: ${{ secrets.GLADOS_EMAIL }}
+
+      # ===== Telegram =====
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+
+      # ===== GitHub Secrets 更新 =====
+      REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright requests pynacl
+          playwright install chromium
+          playwright install-deps
+
+      - name: 🚀 Run GLaDOS auto login & checkin
+        run: |
+          python glados_login.py
