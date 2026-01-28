@@ -196,10 +196,13 @@ def run():
             # 在访问页面前注入，或者先访问域名再注入
             page.goto(LOGIN_URL) 
             inject_local(page, json.loads(local_raw))
-            page.goto(CONSOLE_URL)
-            page.wait_for_load_state("networkidle")
+            page.goto(LOGIN_URL)
+           
+            page.wait_for_load_state("networkidle", timeout=60000)
             time.sleep(5)
-            
+            if "login" in page.url.lower():
+                print(f"当前 url:{page.url}")
+                save_screenshot(page, "session_failed")
             if check_session_by_points(page):
                 tg_send("✅ 使用已有 session 成功")
             else:
