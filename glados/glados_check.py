@@ -4,17 +4,21 @@ import sys
 import requests
 from playwright.sync_api import sync_playwright
 
-# ===== 实时日志 =====
 sys.stdout.reconfigure(line_buffering=True)
 
 EMAIL = os.getenv("GLADOS_EMAIL")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
+def die(msg):
+    raise RuntimeError(msg)
+
 if not EMAIL:
-    raise RuntimeError("缺少 GLADOS_EMAIL")
-if not TG_BOT_TOKEN or not TG_CHAT_ID:
-    raise RuntimeError("缺少 TG_BOT_TOKEN / TG_CHAT_ID")
+    die("❌ 缺少 GLADOS_EMAIL")
+if not TG_BOT_TOKEN:
+    die("❌ 缺少 TG_BOT_TOKEN")
+if not TG_CHAT_ID:
+    die("❌ 缺少 TG_CHAT_ID")
 
 
 class GLaDOSAuto:
@@ -23,15 +27,26 @@ class GLaDOSAuto:
 
     # ---------- Telegram ----------
     def tg_send(self, text):
+        self.log("📤 尝试发送 Telegram 消息")
         url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={
+        resp = requests.post(url, json={
             "chat_id": TG_CHAT_ID,
             "text": text
-        })
+        }, timeout=10)
+
+        self.log(f"📬 TG HTTP 状态码: {resp.status_code}")
+        self.log(f"📬 TG 返回内容: {resp.text}")
+
+        if resp.status_code != 200:
+            die("❌ Telegram 消息发送失败（见上方返回）")
 
     def tg_wait_code(self, timeout=300):
         self.log("📡 开始轮询 Telegram 验证码")
-        self.tg_send("📨 GLaDOS 登录验证码已发送\n请回复：\n/code 123456")
+        self.tg_send(
+            "📨 GLaDOS 登录验证码已发送\n"
+            "请回复指令：\n"
+            "/code 123456"
+        )
 
         offset = None
         start = time.time()
@@ -39,8 +54,11 @@ class GLaDOSAuto:
         while time.time() - start < timeout:
             resp = requests.get(
                 f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates",
-                params={"offset": offset, "timeout": 10}
+                params={"offset": offset, "timeout": 10},
+                timeout=15
             ).json()
+
+            self.log(f"📥 TG updates raw: {resp}")
 
             for item in resp.get("result", []):
                 offset = item["update_id"] + 1
@@ -52,10 +70,10 @@ class GLaDOSAuto:
                         self.log(f"✅ 收到验证码: {code}")
                         return code
 
-            self.log("⌛ 等待 TG 验证码中…")
+            self.log("⌛ 仍未收到验证码，5 秒后重试")
             time.sleep(5)
 
-        raise RuntimeError("⛔ Telegram 验证码等待超时")
+        die("⛔ Telegram 验证码等待超时")
 
     # ---------- 主流程 ----------
     def run(self):
@@ -69,7 +87,7 @@ class GLaDOSAuto:
                 self.request_code(page)
                 code = self.tg_wait_code()
                 self.submit_code(page, code)
-                self.log("🎉 登录流程完成（已验证）")
+                self.log("🎉 登录流程完成")
             finally:
                 browser.close()
 
@@ -102,9 +120,9 @@ class GLaDOSAuto:
 
         if not token:
             self.dump_debug(page, "login_failed")
-            raise RuntimeError("❌ 登录失败：未生成 localStorage")
+            die("❌ 登录失败：localStorage 未生成")
 
-        self.log("✅ 登录成功（localStorage 已生成）")
+        self.log("✅ 登录成功")
 
     def dump_debug(self, page, name):
         self.log(f"📸 Dump debug: {name}")
