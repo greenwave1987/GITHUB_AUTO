@@ -194,9 +194,9 @@ def run():
         if local_raw:
             print("[INFO] 检测到 GLADOS_LOCAL，尝试复用 session")
             # 在访问页面前注入，或者先访问域名再注入
-            page.goto(LOGIN_URL) 
+           
             inject_local(page, json.loads(local_raw))
-            page.goto(LOGIN_URL)
+            page.goto(CONSOLE_URL)
            
             page.wait_for_load_state("networkidle", timeout=60000)
             time.sleep(5)
