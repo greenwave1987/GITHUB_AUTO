@@ -24,12 +24,12 @@ class GLaDOSAuto:
             page = browser.new_page()
 
             try:
-                self.login_request_code(page)
-                self.log("⏸ 已发送验证码，等待下一步（TG 接入）")
+                self.request_code(page)
+                self.wait_for_code()
             finally:
                 browser.close()
 
-    def login_request_code(self, page):
+    def request_code(self, page):
         self.log("STEP 2: 打开登录页")
         page.goto("https://glados.cloud/login", timeout=60000)
 
@@ -40,11 +40,18 @@ class GLaDOSAuto:
         page.click("button:has-text('Get Code')")
 
         time.sleep(3)
+        self.log("✅ 验证码已发送到邮箱")
 
-        self.log("✅ 验证码已请求（请检查邮箱）")
-
-        # 调试用：保存当前页面状态
         self.dump_debug(page, "after_get_code")
+
+    def wait_for_code(self):
+        self.log("⏳ 进入等待验证码阶段（TG 尚未接入）")
+
+        for i in range(30):  # 30 * 10s = 5 分钟
+            self.log(f"⌛ 等待中… ({i+1}/30)")
+            time.sleep(10)
+
+        raise RuntimeError("⛔ 超时：仍未接入验证码输入逻辑")
 
     def dump_debug(self, page, name):
         self.log(f"📸 Dump debug: {name}")
