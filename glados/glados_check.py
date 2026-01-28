@@ -152,6 +152,9 @@ def run():
         if local_raw:
             print("[INFO] 检测到 GLADOS_LOCAL，尝试复用 session")
             inject_local(page, json.loads(local_raw))
+            page.goto(CONSOLE_URL)
+            page.wait_for_load_state("networkidle")
+            time.sleep(10)
             if check_session_by_points(page):
                 tg_send("✅ 使用已有 session 成功")
             else:
