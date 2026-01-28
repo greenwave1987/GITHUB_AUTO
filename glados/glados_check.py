@@ -7,7 +7,7 @@ TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 REPO_TOKEN = os.getenv("REPO_TOKEN")
 GLADOS_LOCAL = os.getenv("GLADOS_LOCAL")
 
-REPO = os.getenv("GITHUB_REPOSITORY")  # owner/repo
+REPO = os.getenv("GITHUB_REPOSITORY")
 
 
 def log(msg):
@@ -92,15 +92,23 @@ def has_valid_cookie(context):
 
 
 def click_send_code(page):
-    page.wait_for_timeout(2000)
-    for btn in page.locator("button").all():
-        try:
-            t = btn.inner_text().lower()
-            if "send" in t or "发送" in t:
+    # 等待按钮出现，支持 iframe
+    try:
+        # 先找 main page
+        btn = page.locator("button:has-text('Send Code'), button:has-text('发送')")
+        btn.wait_for(state="visible", timeout=15000)
+        btn.click()
+        return
+    except TimeoutError:
+        # iframe 尝试
+        for f in page.frames:
+            try:
+                btn = f.locator("button:has-text('Send Code'), button:has-text('发送')")
+                btn.wait_for(state="visible", timeout=5000)
                 btn.click()
                 return
-        except:
-            pass
+            except TimeoutError:
+                continue
     die("❌ 找不到发送验证码按钮")
 
 
@@ -123,7 +131,6 @@ def checkin_by_cookie(context):
         timeout=15
     )
     data = r.json()
-
     msg = data.get("message", "")
     line = next((x for x in data.get("list", []) if "checkin:" in x["business"]), None)
     if line:
