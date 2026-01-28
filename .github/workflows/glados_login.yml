@@ -3,15 +3,15 @@ name: GLaDOS Auto Checkin
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 0 * * *"   # 每天 UTC 00:30（日本时间 09:30）
+    - cron: "30 0 * * *"   # UTC 00:30（日本 09:30）
 
 jobs:
   glados:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
-      - name: 📦 Checkout repo
+      - name: 📦 Checkout
         uses: actions/checkout@v4
 
       - name: 🐍 Setup Python
@@ -19,13 +19,15 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: 📥 Install dependencies
+      - name: 📥 Install Python deps (no requirements.txt)
         run: |
+          set -x
           python -u -m pip install --upgrade pip
-          python -u -m pip install -r requirements.txt
+          python -u -m pip install playwright requests
           python -u -m playwright install chromium
+          python -u -m playwright install-deps
 
-      - name: 🚀 Run GLaDOS checkin (unbuffered)
+      - name: 🚀 Run GLaDOS script (unbuffered)
         env:
           GLADOS_EMAIL: ${{ secrets.GLADOS_EMAIL }}
           GLADOS_PASSWORD: ${{ secrets.GLADOS_PASSWORD }}
