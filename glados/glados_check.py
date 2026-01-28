@@ -26,6 +26,7 @@ class GLaDOSAuto:
         print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
     # ---------- Telegram ----------
+
     def tg_send(self, text):
         self.log("📤 尝试发送 Telegram 消息")
         url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
@@ -52,6 +53,7 @@ class GLaDOSAuto:
         start = time.time()
 
         while time.time() - start < timeout:
+            # 获取更新
             resp = requests.get(
                 f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates",
                 params={"offset": offset, "timeout": 10},
@@ -61,6 +63,7 @@ class GLaDOSAuto:
             self.log(f"📥 TG updates raw: {resp}")
 
             for item in resp.get("result", []):
+                # 更新 offset, 避免重复处理相同的消息
                 offset = item["update_id"] + 1
                 msg = item.get("message", {}).get("text", "")
 
@@ -76,6 +79,7 @@ class GLaDOSAuto:
         die("⛔ Telegram 验证码等待超时")
 
     # ---------- 主流程 ----------
+
     def run(self):
         self.log("STEP 1: 启动 Playwright")
 
@@ -85,7 +89,7 @@ class GLaDOSAuto:
 
             try:
                 self.request_code(page)
-                code = self.tg_wait_code()
+                code = self.tg_wait_code()  # 获取验证码
                 self.submit_code(page, code)
                 self.log("🎉 登录流程完成")
             finally:
@@ -113,8 +117,8 @@ class GLaDOSAuto:
 
         time.sleep(3)
 
-        token = page.evaluate("""
-            () => localStorage.getItem("token")
+        token = page.evaluate(""" 
+            () => localStorage.getItem("token") 
                || localStorage.getItem("user")
         """)
 
