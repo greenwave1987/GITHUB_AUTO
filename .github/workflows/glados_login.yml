@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: 📥 Install Python deps (no requirements.txt)
+      - name: 📥 Install deps
         run: |
           set -x
           python -u -m pip install --upgrade pip
@@ -27,10 +27,9 @@ jobs:
           python -u -m playwright install chromium
           python -u -m playwright install-deps
 
-      - name: 🚀 Run GLaDOS script (unbuffered)
+      - name: 🚀 Run GLaDOS (email only)
         env:
           GLADOS_EMAIL: ${{ secrets.GLADOS_EMAIL }}
-          GLADOS_PASSWORD: ${{ secrets.GLADOS_PASSWORD }}
         run: |
           python -u glados/glados_check.py
 
