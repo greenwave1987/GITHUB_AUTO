@@ -31,7 +31,6 @@ def tg_send(text):
     print(f"[STEP] 📬 TG HTTP 状态码: {resp.status_code}")
     if resp.status_code != 200:
         print(f"[ERROR] TG 返回内容: {resp.text}")
-        # 不在这里调 die，防止死循环
 
 def tg_wait_code(timeout=300):
     print(f"[STEP] 📡 开始轮询 Telegram 验证码")
@@ -76,24 +75,12 @@ def update_secret(name, value):
         "Authorization": f"token {REPO_TOKEN}",
         "Accept": "application/vnd.github+json"
     }
-    # 注意：在实际 GitHub Actions 中，更新 Secret 需要先加密。
-    # 此处保持原逻辑，但提醒：直接 PUT 可能会因未加密而失败（除非 API 另有配置）
     r = requests.put(
         api,
         headers=headers,
         json={"encrypted_value": value, "key_id": "dummy"}
     )
     print(f"[RESULT] Secret 更新状态码: {r.status_code}")
-
-def inject_local(page, local_data):
-    print("[STEP] 注入 localStorage")
-    page.add_init_script(
-        f"""() => {{
-            const data = {json.dumps(local_data)};
-            for (const k in data) localStorage.setItem(k, data[k]);
-        }}"""
-    )
-    print(f"[OK] 注入 localStorage 条目数: {len(local_data)}")
 
 def check_session_by_points(page):
     print("[STEP] 使用 /api/user/points 校验 session")
@@ -167,8 +154,7 @@ def do_checkin(page):
 def run():
     print("====== GLaDOS 自动签到开始 ======")
     with sync_playwright() as p:
-        # --- 参考 open_browser 方法修改的启动部分 ---
-        print("[STEP] 启动 Playwright 浏览器 (Anti-Fingerprint)")
+        # --- 准备启动参数 ---
         launch_args = {
             "headless": True,
             "args": [
@@ -178,31 +164,38 @@ def run():
                 "--exclude-switches=enable-automation",
             ]
         }
-        
+
+        # --- 读取存储状态 ---
+        storage = None
+        local_raw = os.environ.get("GLADOS_LOCAL")
+        if local_raw:
+            try:
+                storage = json.loads(local_raw)
+                print("[INFO] 检测到 GLADOS_LOCAL，载入 storage_state")
+            except Exception as e:
+                print(f"[ERROR] 解析 GLADOS_LOCAL 失败: {e}")
+
+        # --- 启动浏览器与上下文 (完全按照你给的参考格式) ---
         browser = p.chromium.launch(**launch_args)
-        
-        # 模拟真实的浏览器环境
         context = browser.new_context(
+            storage_state=storage,
             viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 Chrome/128.0.0.0"
         )
         
         page = context.new_page()
         # ------------------------------------------
 
-        local_raw = os.environ.get("GLADOS_LOCAL")
-        if local_raw:
-            print("[INFO] 检测到 GLADOS_LOCAL，尝试复用 session")
-            # 在访问页面前注入，或者先访问域名再注入
-           
-            inject_local(page, json.loads(local_raw))
+        if storage:
+            print("[INFO] 尝试复用 session")
             page.goto(CONSOLE_URL)
-           
             page.wait_for_load_state("networkidle", timeout=60000)
             time.sleep(5)
+            
             if "login" in page.url.lower():
                 print(f"当前 url:{page.url}")
                 save_screenshot(page, "session_failed")
+            
             if check_session_by_points(page):
                 tg_send("✅ 使用已有 session 成功")
             else:
@@ -220,10 +213,10 @@ def run():
 
         save_screenshot(page, "login_success")
 
-        # 保存最新的 localStorage
-        print("[STEP] 读取 localStorage")
-        local_data = page.evaluate("() => Object.assign({}, localStorage)")
-        update_secret("GLADOS_LOCAL", json.dumps(local_data))
+        # --- 获取并保存最新的 storage_state (包含 Cookie 和 LocalStorage) ---
+        print("[STEP] 读取完整 storage_state")
+        new_storage_state = context.storage_state()
+        update_secret("GLADOS_LOCAL", json.dumps(new_storage_state))
 
         do_checkin(page)
         tg_send("🎉 GLaDOS 签到完成")
