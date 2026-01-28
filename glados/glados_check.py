@@ -6,7 +6,6 @@ import requests
 from playwright.sync_api import sync_playwright
 from nacl import public, encoding
 
-# ================= 基础配置 =================
 EMAIL = os.getenv("GLADOS_EMAIL")
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
@@ -18,7 +17,7 @@ GLADOS_LOCAL = os.getenv("GLADOS_LOCAL")
 def die(msg):
     raise RuntimeError(msg)
 
-# ================= GitHub Secret 更新 =================
+# ================= GitHub Secret =================
 class SecretUpdater:
     def __init__(self, name):
         self.name = name
@@ -34,7 +33,6 @@ class SecretUpdater:
             "Accept": "application/vnd.github.v3+json"
         }
 
-        print("🌐 获取仓库公钥")
         r = requests.get(
             f"https://api.github.com/repos/{REPO}/actions/secrets/public-key",
             headers=headers,
@@ -46,7 +44,6 @@ class SecretUpdater:
         pk = public.PublicKey(key["key"].encode(), encoding.Base64Encoder())
         encrypted = public.SealedBox(pk).encrypt(value.encode())
 
-        print("📤 回写 Secret:", self.name)
         r = requests.put(
             f"https://api.github.com/repos/{REPO}/actions/secrets/{self.name}",
             headers=headers,
@@ -96,7 +93,6 @@ class GLaDOSAuto:
                         print("✅ 收到【新】验证码:", code)
                         return code
 
-            print("⌛ 未收到新验证码，5 秒后重试")
             time.sleep(5)
 
         die("⛔ Telegram 验证码等待超时")
@@ -126,8 +122,8 @@ class GLaDOSAuto:
         page.wait_for_load_state("networkidle")
 
         page.fill("input[type='email']", EMAIL)
-
         send_ts = int(time.time())
+
         page.locator("button").first.click()
 
         self.tg_send(
@@ -142,11 +138,11 @@ class GLaDOSAuto:
         page.locator("button").nth(1).click()
         page.wait_for_load_state("networkidle")
 
-    # ---------- 保存 state ----------
+    # ---------- 保存 state（⚠️ 只能在已登录后） ----------
     def save_state(self, context):
         state = context.storage_state()
         raw = json.dumps(state, ensure_ascii=False)
-        print("💾 更新 storage_state")
+        print("💾 保存【已登录】storage_state")
         SecretUpdater("GLADOS_LOCAL").update(raw)
 
     # ---------- 签到 ----------
@@ -171,7 +167,7 @@ class GLaDOSAuto:
             browser = p.chromium.launch(headless=True)
 
             if GLADOS_LOCAL:
-                print("♻️ 使用缓存 storage_state")
+                print("♻️ 使用缓存 session")
                 context = browser.new_context(
                     storage_state=json.loads(GLADOS_LOCAL)
                 )
@@ -185,18 +181,19 @@ class GLaDOSAuto:
 
             if not self.is_logged_in(page):
                 self.login(page)
-                if not self.is_logged_in(page):
-                    die("❌ 登录失败")
 
-            # ✅ 不论哪种登录方式，都保存最新 state
+            if not self.is_logged_in(page):
+                die("❌ 登录失败，终止")
+
+            # ✅ 只有确认登录成功，才保存
             self.save_state(context)
 
-            # ✅ 签到
+            # ✅ 再签到
             self.checkin(page)
 
             browser.close()
 
-# ================= 运行 =================
+# ================= 启动 =================
 if __name__ == "__main__":
     if not EMAIL:
         die("缺少 GLADOS_EMAIL")
