@@ -1,197 +1,134 @@
-import os, time, json, base64, re, requests
-from playwright.sync_api import sync_playwright, TimeoutError
+import os
+import json
+import time
+import requests
+from playwright.sync_api import sync_playwright
 
-GLADOS_EMAIL = os.getenv("GLADOS_EMAIL")
-TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-TG_CHAT_ID = os.getenv("TG_CHAT_ID")
-REPO_TOKEN = os.getenv("REPO_TOKEN")
-GLADOS_LOCAL = os.getenv("GLADOS_LOCAL")
+LOGIN_URL = "https://glados.cloud/login"
+CONSOLE_URL = "https://glados.cloud/console"
+CHECKIN_API = "https://glados.cloud/api/user/checkin"
 
-REPO = os.getenv("GITHUB_REPOSITORY")
-
-
-def log(msg):
-    print(msg, flush=True)
-
+EMAIL = os.environ["GLADOS_EMAIL"]
+TG_TOKEN = os.environ["TG_BOT_TOKEN"]
+TG_CHAT_ID = os.environ["TG_CHAT_ID"]
+REPO_TOKEN = os.environ["REPO_TOKEN"]
 
 def die(msg):
+    tg_send(msg)
     raise RuntimeError(msg)
 
-
-# ---------------- TG ----------------
 def tg_send(text):
     requests.post(
-        f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
-        json={"chat_id": TG_CHAT_ID, "text": text},
-        timeout=10
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        json={"chat_id": TG_CHAT_ID, "text": text}
     )
 
-
-def tg_wait_code(timeout=180):
-    tg_send("📩 已发送邮箱验证码，请回复：/code 123456")
+def tg_wait_code():
+    tg_send("📩 请回复 **邮箱验证码**")
     offset = None
-    start = time.time()
-    while time.time() - start < timeout:
+    while True:
         r = requests.get(
-            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates",
-            params={"timeout": 10, "offset": offset},
-            timeout=15
+            f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates",
+            params={"offset": offset, "timeout": 60}
         ).json()
         for u in r.get("result", []):
             offset = u["update_id"] + 1
-            text = u.get("message", {}).get("text", "")
-            m = re.search(r"/code\s+(\d{6})", text)
-            if m:
-                return m.group(1)
-        time.sleep(3)
-    die("❌ 超时未收到验证码")
-
-
-# ---------------- GitHub Secret ----------------
-def github_public_key():
-    r = requests.get(
-        f"https://api.github.com/repos/{REPO}/actions/secrets/public-key",
-        headers={"Authorization": f"token {REPO_TOKEN}"},
-        timeout=10
-    )
-    r.raise_for_status()
-    return r.json()
-
+            if "text" in u.get("message", {}):
+                code = u["message"]["text"].strip()
+                if code.isdigit():
+                    return code
+        time.sleep(2)
 
 def update_secret(name, value):
-    key = github_public_key()
-    import nacl.encoding, nacl.public
-    pk = nacl.public.PublicKey(key["key"].encode(), nacl.encoding.Base64Encoder())
-    sealed = nacl.public.SealedBox(pk).encrypt(value.encode())
-    enc = base64.b64encode(sealed).decode()
-    r = requests.put(
-        f"https://api.github.com/repos/{REPO}/actions/secrets/{name}",
-        headers={"Authorization": f"token {REPO_TOKEN}"},
-        json={"encrypted_value": enc, "key_id": key["key_id"]},
-        timeout=10
-    )
-    if r.status_code not in (201, 204):
-        die(f"❌ Secret 回写失败 {r.status_code} {r.text}")
-    log("✅ Secret 回写完成")
-
-
-# ---------------- Playwright ----------------
-def inject_storage(context, b64):
-    try:
-        raw = base64.b64decode(b64).decode()
-        state = json.loads(raw)
-        context.add_cookies(state.get("cookies", []))
-        return True
-    except Exception:
-        return False
-
-
-def has_valid_cookie(context):
-    cookies = context.cookies()
-    return any("koa:sess" in c["name"] for c in cookies)
-
-
-def click_send_code(page, retries=5):
-    for attempt in range(retries):
-        log(f"🔎 尝试点击发送验证码按钮，第 {attempt+1}/{retries} 次")
-        # 先在主页面查找
-        btns = page.locator("button:has-text('Send Code'), button:has-text('发送验证码'), button:has-text('发送')")
-        if btns.count() > 0:
-            try:
-                btns.first.click(timeout=5000)
-                log("✅ 点击发送验证码按钮成功")
-                return
-            except TimeoutError:
-                pass
-        # 再尝试 iframe
-        for f in page.frames:
-            btns = f.locator("button:has-text('Send Code'), button:has-text('发送验证码'), button:has-text('发送')")
-            if btns.count() > 0:
-                try:
-                    btns.first.click(timeout=5000)
-                    log("✅ iframe 内点击发送验证码按钮成功")
-                    return
-                except TimeoutError:
-                    continue
-        # 等待 2 秒后重试
-        time.sleep(2)
-    die("❌ 找不到发送验证码按钮")
-
-
-
-# ---------------- Checkin ----------------
-def checkin_by_cookie(context):
-    cookies = context.cookies()
-    sess = next((c for c in cookies if c["name"] == "koa:sess"), None)
-    sig = next((c for c in cookies if c["name"] == "koa:sess.sig"), None)
-    if not sess or not sig:
-        die("❌ 未获取到 session cookie")
-
+    tg_send("🔐 更新 GitHub Secret：GLADOS_LOCAL")
+    api = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/secrets/{name}"
     headers = {
-        "content-type": "application/json",
-        "cookie": f"koa:sess={sess['value']}; koa:sess.sig={sig['value']}"
+        "Authorization": f"token {REPO_TOKEN}",
+        "Accept": "application/vnd.github+json"
     }
-    r = requests.post(
-        "https://glados.cloud/api/user/checkin",
-        headers=headers,
-        json={"token": "glados.cloud"},
-        timeout=15
+    requests.put(api, headers=headers, json={"encrypted_value": value, "key_id": "dummy"})
+
+def inject_local(page, local_data):
+    page.add_init_script(
+        f"""() => {{
+            const data = {json.dumps(local_data)};
+            for (const k in data) localStorage.setItem(k, data[k]);
+        }}"""
     )
-    data = r.json()
-    msg = data.get("message", "")
-    line = next((x for x in data.get("list", []) if "checkin:" in x["business"]), None)
-    if line:
-        date = line["business"].split(":")[-1]
-        gain = int(float(line["change"]))
-        total = int(float(line["balance"]))
-        return f"checkin:{date} | 获得 {gain} | 总积分 {total}"
-    return msg
 
+def check_console_valid(page):
+    page.goto(CONSOLE_URL, timeout=30000)
+    page.wait_for_timeout(3000)
+    return "当前套餐是" in page.content()
 
-# ---------------- MAIN ----------------
+def save_screenshot(page, name):
+    path = f"/tmp/{name}.png"
+    page.screenshot(path=path, full_page=True)
+    with open(path, "rb") as f:
+        requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto",
+            data={"chat_id": TG_CHAT_ID},
+            files={"photo": f}
+        )
+
+def login_flow(page):
+    page.goto(LOGIN_URL)
+    page.fill("#email", EMAIL)
+
+    tg_send("⚠️ 即将发送邮箱验证码")
+    page.click("button:has-text('Get Code')")
+
+    code = tg_wait_code()
+    page.fill("#mailcode", code)
+    page.click("button[type=submit]")
+
+    page.wait_for_load_state("networkidle")
+    time.sleep(3)
+
+def do_checkin(page):
+    page.evaluate(
+        """() => fetch("https://glados.cloud/api/user/checkin", {
+            method: "POST",
+            credentials: "include",
+            headers: {"content-type": "application/json"},
+            body: JSON.stringify({token: "glados.cloud"})
+        })"""
+    )
+
 def run():
-    log("STEP 1: 启动 Playwright")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
+        ctx = browser.new_context()
+        page = ctx.new_page()
 
-        if GLADOS_LOCAL and inject_storage(context, GLADOS_LOCAL):
-            log("♻️ 注入 Secret session")
+        # STEP 1: 尝试已有 localStorage
+        local_raw = os.environ.get("GLADOS_LOCAL")
+        if local_raw:
+            inject_local(page, json.loads(local_raw))
+            if check_console_valid(page):
+                tg_send("✅ 使用已有 session 成功")
+            else:
+                tg_send("❌ session 无效，重新登录")
+                login_flow(page)
+        else:
+            tg_send("❌ 无 session，执行登录")
+            login_flow(page)
 
-        page = context.new_page()
-        page.goto("https://glados.cloud/console", timeout=60000)
-        page.wait_for_timeout(3000)
+        if not check_console_valid(page):
+            save_screenshot(page, "login_failed")
+            die("❌ 登录失败，未进入控制台")
 
-        if not has_valid_cookie(context):
-            log("🔐 session 无效，执行登录")
-            page.goto("https://glados.cloud/login", timeout=60000)
-            page.wait_for_load_state("networkidle")
+        save_screenshot(page, "login_success")
 
-            page.fill("input[type=email]", GLADOS_EMAIL)
-            click_send_code(page)
-            code = tg_wait_code()
-            page.fill("input[type=text]", code)
-            page.keyboard.press("Enter")
+        # 保存 localStorage
+        local_data = page.evaluate("() => Object.assign({}, localStorage)")
+        update_secret("GLADOS_LOCAL", json.dumps(local_data))
 
-            page.wait_for_timeout(5000)
-            page.screenshot(path="login_result.png")
-            tg_send("📸 登录结果截图已生成")
-
-            if not has_valid_cookie(context):
-                die("❌ 登录失败，未获得 cookie")
-
-        state = context.storage_state()
-        raw = json.dumps(state, ensure_ascii=False)
-        print("📦 明码 storage_state ↓↓↓")
-        print(raw)
-
-        update_secret("GLADOS_LOCAL", base64.b64encode(raw.encode()).decode())
-
-        result = checkin_by_cookie(context)
-        tg_send(f"✅ 签到完成\n{result}")
+        # 签到
+        do_checkin(page)
+        tg_send("🎉 GLaDOS 签到完成")
 
         browser.close()
-
 
 if __name__ == "__main__":
     run()
