@@ -1,203 +1,103 @@
 import os
-import sys
 import json
 import time
 import base64
 import requests
 from playwright.sync_api import sync_playwright
 
-# ================== 基础配置 ==================
-GLADOS_URL = "https://glados.cloud"
-CONSOLE_URL = "https://glados.cloud/console"
+GLADOS_CONSOLE = "https://glados.cloud/console"
+GLADOS_LOGIN = "https://glados.cloud/login"
 CHECKIN_API = "https://glados.cloud/api/user/checkin"
 
-SECRET_NAME = "GLADOS_LOCAL"
-REPO_TOKEN = os.getenv("REPO_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPOSITORY")
 
-TG_TOKEN = os.getenv("TG_BOT_TOKEN")
-TG_CHAT_ID = os.getenv("TG_CHAT_ID")
-
-# ================== 工具函数 ==================
 def log(msg):
     print(msg, flush=True)
+
 
 def die(msg):
     raise RuntimeError(msg)
 
-# ================== GitHub Secret ==================
+
+# ======================
+# GitHub Secret 更新器
+# ======================
 class SecretUpdater:
     def __init__(self):
-        if not REPO_TOKEN or not GITHUB_REPO:
+        self.repo = os.getenv("GITHUB_REPOSITORY")
+        self.token = os.getenv("REPO_TOKEN")
+        if not self.repo or not self.token:
             die("❌ 缺少 REPO_TOKEN 或 GITHUB_REPOSITORY")
-        self.api = f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/{SECRET_NAME}"
+
+        self.api = f"https://api.github.com/repos/{self.repo}/actions/secrets/GLADOS_LOCAL"
         self.headers = {
-            "Authorization": f"Bearer {REPO_TOKEN}",
-            "Accept": "application/vnd.github+json"
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/vnd.github+json",
         }
+        log("🔐 SecretUpdater 初始化完成")
 
-    def get_public_key(self):
-        r = requests.get(self.api + "/public-key", headers=self.headers)
-        if r.status_code != 200:
-            die("❌ 获取仓库公钥失败")
-        return r.json()
+    def update(self, plain_state: dict):
+        raw = json.dumps(plain_state, ensure_ascii=False)
+        encoded = base64.b64encode(raw.encode()).decode()
 
-    def update(self, plaintext: str):
-        import nacl.encoding
-        import nacl.public
-
-        key = self.get_public_key()
-        public_key = nacl.public.PublicKey(
-            key["key"].encode(), nacl.encoding.Base64Encoder()
+        resp = requests.put(
+            self.api,
+            headers=self.headers,
+            json={"encrypted_value": encoded, "key_id": "dummy"},
         )
-        sealed_box = nacl.public.SealedBox(public_key)
-        encrypted = sealed_box.encrypt(plaintext.encode())
-        encrypted_value = base64.b64encode(encrypted).decode()
 
-        payload = {
-            "encrypted_value": encrypted_value,
-            "key_id": key["key_id"]
-        }
+        if resp.status_code not in (201, 204):
+            die(f"❌ Secret 回写失败: {resp.status_code} {resp.text}")
 
-        r = requests.put(self.api, headers=self.headers, json=payload)
-        if r.status_code not in (201, 204):
-            die(f"❌ Secret 回写失败: {r.status_code} {r.text}")
+        log("✅ Secret 回写完成，HTTP 204")
 
-        log("✅ Secret 回写完成")
 
-# ================== Session 处理 ==================
-def load_secret_state():
-    raw = os.getenv(SECRET_NAME)
+# ======================
+# Session 工具函数
+# ======================
+def load_secret_session():
+    raw = os.getenv("GLADOS_LOCAL")
     if not raw:
         return None
     try:
-        return json.loads(base64.b64decode(raw).decode())
+        decoded = base64.b64decode(raw).decode()
+        return json.loads(decoded)
     except Exception:
         return None
 
-def save_secret_state(state: dict):
-    plaintext = base64.b64encode(
-        json.dumps(state, ensure_ascii=False).encode()
-    ).decode()
-    SecretUpdater().update(plaintext)
+
+def has_valid_cookie(context):
+    cookies = context.cookies()
+    for c in cookies:
+        if c["domain"].endswith("glados.cloud") and c["name"].startswith("koa:sess"):
+            return True
+    return False
+
 
 def extract_glados_cookies(context):
-    cookies = context.cookies(GLADOS_URL)
-    sess = None
-    sig = None
+    cookies = context.cookies()
+    jar = {}
     for c in cookies:
-        if c["name"] == "koa:sess":
-            sess = c
-        elif c["name"] == "koa:sess.sig":
-            sig = c
-    if not sess or not sig:
-        return None
-    return [sess, sig]
+        if c["domain"].endswith("glados.cloud"):
+            jar[c["name"]] = c["value"]
+    if not jar:
+        die("❌ 未获取到 GLaDOS cookie")
+    return jar
 
-def cookies_to_header(cookies):
-    return "; ".join([f"{c['name']}={c['value']}" for c in cookies])
 
-# ================== Telegram ==================
-def tg_send(text):
-    if not TG_TOKEN or not TG_CHAT_ID:
-        return
-    requests.post(
-        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-        json={"chat_id": TG_CHAT_ID, "text": text}
-    )
+# ======================
+# Telegram 验证码
+# ======================
+def wait_tg_code():
+    token = os.getenv("TG_BOT_TOKEN")
+    chat_id = os.getenv("TG_CHAT_ID")
+    if not token or not chat_id:
+        die("❌ 缺少 TG 配置")
 
-# ================== 核心流程 ==================
-def run():
-    log("STEP 1: 启动 Playwright")
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-
-        state = load_secret_state()
-        if state:
-            log("♻️ 使用 Secret 注入 session")
-            context = browser.new_context(storage_state=state)
-        else:
-            log("🆕 新建 session")
-            context = browser.new_context()
-
-        page = context.new_page()
-        page.goto(CONSOLE_URL, wait_until="networkidle")
-
-        cookies = extract_glados_cookies(context)
-
-        # ===== cookie 无效 → 登录 =====
-        if not cookies:
-            log("🔐 session 无效，执行登录")
-            page.goto(GLADOS_URL)
-
-            page.fill("input[type=email]", os.getenv("GLADOS_EMAIL"))
-            page.click("button:has-text('Send')")
-
-            code = wait_tg_code()
-            page.fill("input[type=text]", code)
-            page.click("button:has-text('Login')")
-
-            page.wait_for_load_state("networkidle")
-            page.goto(CONSOLE_URL, wait_until="networkidle")
-
-            cookies = extract_glados_cookies(context)
-            if not cookies:
-                die("❌ 登录后仍未获取到 cookie")
-
-        log("✅ cookie 验证通过")
-
-        # ===== 保存 storage_state =====
-        state = context.storage_state()
-        log("📦 获取到的明码 storage_state ↓↓↓")
-        print(json.dumps(state, indent=2, ensure_ascii=False))
-
-        save_secret_state(state)
-
-        # ===== 签到 =====
-        log("🚀 执行签到")
-        headers = {
-            "Content-Type": "application/json",
-            "Cookie": cookies_to_header(cookies),
-            "Accept": "application/json"
-        }
-        resp = requests.post(
-            CHECKIN_API,
-            headers=headers,
-            json={"token": "glados.cloud"}
-        ).json()
-
-        log(f"📊 签到返回: {resp}")
-
-        # ===== 提取结果 =====
-        item = next(
-            (i for i in resp.get("list", []) if i["business"].startswith("system:checkin")),
-            None
-        )
-
-        if item:
-            date = item["business"].split(":")[-1]
-            gain = int(float(item["change"]))
-            total = int(float(item["balance"]))
-            msg = f"checkin:{date} | 获得 {gain} | 总积分 {total}"
-        else:
-            msg = resp.get("message", "未知结果")
-
-        log(f"✅ {msg}")
-        tg_send(f"🟢 GLaDOS 签到结果\n{msg}")
-
-        browser.close()
-
-# ================== TG 验证码 ==================
-def wait_tg_code(timeout=180):
-    log("📡 等待 Telegram 验证码")
-    start = time.time()
     offset = None
-
-    while time.time() - start < timeout:
+    for _ in range(30):
         r = requests.get(
-            f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates",
-            params={"offset": offset, "timeout": 10}
+            f"https://api.telegram.org/bot{token}/getUpdates",
+            params={"offset": offset, "timeout": 5},
         ).json()
 
         for u in r.get("result", []):
@@ -206,10 +106,98 @@ def wait_tg_code(timeout=180):
             if text.startswith("/code"):
                 return text.split()[-1]
 
+        log("⌛ 未收到验证码，5 秒后重试")
         time.sleep(5)
 
-    die("❌ 获取验证码超时")
+    die("❌ Telegram 未收到验证码")
 
-# ================== 启动 ==================
+
+# ======================
+# 签到
+# ======================
+def checkin(cookie_jar):
+    resp = requests.post(
+        CHECKIN_API,
+        headers={"Content-Type": "application/json"},
+        cookies=cookie_jar,
+        json={"token": "glados.cloud"},
+        timeout=10,
+    )
+
+    data = resp.json()
+
+    if "list" in data:
+        for item in data["list"]:
+            if item["business"].startswith("system:checkin"):
+                date = item["business"].split(":")[-1]
+                gain = int(float(item["change"]))
+                balance = int(float(item["balance"]))
+                return f"checkin:{date} | 获得 {gain} | 总积分 {balance}"
+
+    return data.get("message", "未知结果")
+
+
+# ======================
+# 主流程
+# ======================
+def run():
+    log("STEP 1: 启动 Playwright")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+
+        # 注入 session
+        secret_state = load_secret_session()
+        if secret_state:
+            log("♻️ 使用 Secret 注入 session")
+            context.add_cookies(secret_state.get("cookies", []))
+            for o in secret_state.get("origins", []):
+                context.add_init_script(
+                    f"""
+                    Object.entries({json.dumps({i['name']: i['value'] for i in o['localStorage']})})
+                    .forEach(([k,v])=>localStorage.setItem(k,v));
+                    """
+                )
+
+        page = context.new_page()
+        page.goto(GLADOS_CONSOLE, wait_until="networkidle")
+
+        # 判断 session
+        if not has_valid_cookie(context):
+            log("🔐 session 无效，执行登录")
+            page.goto(GLADOS_LOGIN, wait_until="networkidle")
+
+            page.wait_for_selector("input[type=email]", timeout=15000)
+            page.fill("input[type=email]", os.getenv("GLADOS_EMAIL"))
+            page.click("button")
+
+            code = wait_tg_code()
+            page.fill("input[type=text]", code)
+            page.click("button")
+
+            page.wait_for_load_state("networkidle")
+
+            if not has_valid_cookie(context):
+                die("❌ 登录失败，未获得 cookie")
+
+        log("✅ session 有效")
+
+        # 保存 storage_state
+        state = context.storage_state()
+        log("📦 获取到的明码 storage_state ↓↓↓")
+        print(json.dumps(state, indent=2, ensure_ascii=False))
+
+        SecretUpdater().update(state)
+
+        # 签到
+        log("🚀 执行签到")
+        cookies = extract_glados_cookies(context)
+        result = checkin(cookies)
+        log(f"🎉 签到结果: {result}")
+
+        browser.close()
+
+
 if __name__ == "__main__":
     run()
