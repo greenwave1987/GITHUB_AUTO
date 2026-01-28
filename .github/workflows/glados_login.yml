@@ -1,30 +1,17 @@
-name: GLaDOS Auto Login & Checkin
+name: GLaDOS Auto Checkin
 
 on:
   workflow_dispatch:
   schedule:
-    # 每天 9:00 UTC（北京时间 17:00）
-    - cron: "0 9 * * *"
+    - cron: "30 0 * * *"   # 每天 UTC 00:30（日本时间 09:30）
 
 jobs:
   glados:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    env:
-      # ===== GLaDOS =====
-      GLADOS_EMAIL: ${{ secrets.GLADOS_EMAIL }}
-
-      # ===== Telegram =====
-      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-
-      # ===== GitHub Secrets 更新 =====
-      REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
-      GITHUB_REPOSITORY: ${{ github.repository }}
+    timeout-minutes: 15
 
     steps:
-      - name: 📥 Checkout
+      - name: 📦 Checkout repo
         uses: actions/checkout@v4
 
       - name: 🐍 Setup Python
@@ -32,13 +19,24 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: 📦 Install dependencies
+      - name: 📥 Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install playwright requests pynacl
-          playwright install chromium
-          playwright install-deps
+          python -u -m pip install --upgrade pip
+          python -u -m pip install -r requirements.txt
+          python -u -m playwright install chromium
 
-      - name: 🚀 Run GLaDOS auto login & checkin
+      - name: 🚀 Run GLaDOS checkin (unbuffered)
+        env:
+          GLADOS_EMAIL: ${{ secrets.GLADOS_EMAIL }}
+          GLADOS_PASSWORD: ${{ secrets.GLADOS_PASSWORD }}
         run: |
-          python glados/glados_check.py
+          python -u glados/glados_check.py
+
+      - name: 📸 Upload debug artifacts (if failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glados-debug
+          path: |
+            *.png
+            *.html
