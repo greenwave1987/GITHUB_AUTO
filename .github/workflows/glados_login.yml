@@ -27,9 +27,11 @@ jobs:
           python -u -m playwright install chromium
           python -u -m playwright install-deps
 
-      - name: 🚀 Run GLaDOS (email only)
+      - name: 🚀 Run GLaDOS (email + tg)
         env:
           GLADOS_EMAIL: ${{ secrets.GLADOS_EMAIL }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           python -u glados/glados_check.py
 
