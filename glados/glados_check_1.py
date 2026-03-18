@@ -3,6 +3,7 @@ import json
 import time
 import requests
 import base64
+import random
 from nacl import encoding, public
 from playwright.sync_api import sync_playwright
 import matplotlib.pyplot as plt
@@ -107,6 +108,10 @@ def run():
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-blink-features=AutomationControlled"])
         
         for index, email in enumerate(EMAILS):
+            # --- 随机等待，模拟真人操作 ---
+            sleep_time = random.randint(60, 120)
+            print(f"[WAIT] ⏳ 随机等待 {sleep_time} 秒...")
+            time.sleep(sleep_time)
             email = email.strip()
             print(f"\n>>> 处理账号: {email}")
             current_storage = local_storage_list[index] if index < len(local_storage_list) else None
