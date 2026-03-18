@@ -108,8 +108,7 @@ def run():
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-blink-features=AutomationControlled"])
         
         for index, email in enumerate(EMAILS):
-            if index < 5:
-                continue
+            
             # --- 随机等待，模拟真人操作 ---
             sleep_time = random.randint(60, 120)
             print(f"[WAIT] ⏳ 随机等待 {sleep_time} 秒...")
