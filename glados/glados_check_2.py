@@ -240,7 +240,7 @@ def run():
             ]
         )
 
-        for email in EMAILS:
+        for email in filter(None, [i.strip() for i in EMAILS]):
 
             sleep_time = random.randint(60,120)
 
