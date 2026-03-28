@@ -30,91 +30,80 @@ async def run_qq_login():
 
         browser = await p.chromium.launch(**launch_args)
         context = await browser.new_context(viewport={'width': 1280, 'height': 800})
-        # 允许极长的超时，防止脚本中途崩溃
-        context.set_default_timeout(120000)
         page = await context.new_page()
 
         log("🌐 访问京东登录页...")
         await page.goto("https://passport.jd.com/new/login.aspx", wait_until="domcontentloaded")
-
-        # 1. 点击 QQ 登录 (不再使用 wait_for_url)
-        try:
-            qq_btn_selector = 'a.pdl:has-text("QQ登录")'
-            await page.wait_for_selector(qq_btn_selector, state="visible", timeout=30000)
-            log("🖱️ 点击 QQ 登录按钮，启动异步探测...")
-            await page.click(qq_btn_selector)
-        except Exception as e:
-            log(f"❌ 初始页面异常: {e}")
-            await browser.close()
-            return
-
-        # 2. 强力探测循环：无视 URL 跳转状态，直接找二维码
-        log("🔍 进入扫描探测模式...")
-        qr_img = None
-        iframe_selector = "#ptlogin_iframe"
         
-        # 尝试 20 次探测，每次间隔 4 秒，总计 80 秒
+        # 等待页面 JS 绑定（很重要）
+        await asyncio.sleep(5)
+
+        # 1. 强力触发点击循环
+        log("🔍 准备触发 QQ 登录按钮...")
+        qr_img_element = None
+        iframe_selector = "#ptlogin_iframe"
+
         for i in range(1, 21):
             curr_url = page.url
-            log(f"⏳ 第 {i} 次探测 | 当前 URL: {curr_url}")
-            
-            try:
-                # 方案 A: 检查是否存在 QQ 登录的 iframe
-                if await page.query_selector(iframe_selector):
+            log(f"⏳ 第 {i} 次探测 | URL: {curr_url}")
+
+            # 检查是否已经在 QQ 页面了
+            if "qq.com" in curr_url:
+                # 尝试探测 iframe 里的二维码
+                try:
                     frame = page.frame_locator(iframe_selector)
-                    
-                    # 探测二维码图片
                     target_qr = frame.locator("#qrlogin_img")
                     if await target_qr.is_visible():
-                        qr_img = target_qr
-                        log("✅ 成功！在 Iframe 中发现 QQ 二维码")
+                        qr_img_element = target_qr
+                        log("✅ 成功发现二维码！")
                         break
-                
-                # 方案 B: 检查是否需要切换模式
-                switch_btn = page.frame_locator(iframe_selector).locator("#qr_switch_logo")
-                if await switch_btn.is_visible():
-                    await switch_btn.click()
-                    log("🖱️ 已手动切换至扫码模式")
-            except Exception as e:
-                pass # 忽略探测过程中的微小报错
-            
-            # 如果 12 次探测（约 50 秒）还没到，但截图已经显示有了，可能是 Playwright 缓存问题
-            # 这里我们不报错，继续等
+                except: pass
+            else:
+                # 如果还在京东页面，尝试点击（每 3 次探测尝试点击一次）
+                if i % 3 == 1:
+                    log("🖱️ 尝试通过 JS 强行触发 QQ 登录按钮...")
+                    try:
+                        await page.evaluate("""() => {
+                            const qqBtn = document.querySelector('a.pdl[onclick*="qqLogin"]');
+                            if (qqBtn) {
+                                qqBtn.click();
+                                return "CLICKED";
+                            }
+                            return "NOT_FOUND";
+                        }""")
+                    except Exception as e:
+                        log(f"⚠️ 点击尝试异常: {e}")
+
             await asyncio.sleep(4)
 
-        if qr_img:
-            # 截取二维码并发送
-            await qr_img.screenshot(path="qq_qr.png")
+        # 2. 结果处理
+        if qr_img_element:
+            await qr_img_element.screenshot(path="qq_qr.png")
             send_tg_photo("qq_qr.png", "🛡️ <b>京东 QQ 扫码</b>\n请尽快扫码")
-        else:
-            log("❌ 探测超时，未能在页面中提取到二维码元素")
-            await page.screenshot(path="final_debug.png")
-            send_tg_photo("final_debug.png", "⚠️ <b>探测失败</b>\n请检查截图，看页面是否卡在了加载圈或验证码。")
-            await browser.close()
-            return
+            
+            # 3. 监控扫码跳转
+            log("📡 监控扫码跳转 (180s)...")
+            start_time = time.time()
+            while time.time() - start_time < 180:
+                if "jd.com" in page.url and "passport" not in page.url:
+                    log("🎊 登录成功跳转！")
+                    break
+                await asyncio.sleep(5)
 
-        # 3. 监控扫码跳转
-        log("📡 监控登录跳转 (180s)...")
-        start_time = time.time()
-        while time.time() - start_time < 180:
-            if "jd.com" in page.url and "passport" not in page.url:
-                log("🎊 登录成功！")
-                break
+            # 4. 提取 Cookie
+            log("🔍 提取最终 Cookie...")
             await asyncio.sleep(5)
-
-        # 4. 提取 Cookie
-        log("🔍 提取 Cookie...")
-        await asyncio.sleep(5)
-        cookies = await context.cookies()
-        ck_dict = {c['name']: c['value'] for c in cookies}
-        pt_key = ck_dict.get('pt_key')
-        
-        if pt_key:
-            res = f"pt_key={pt_key};pt_pin={ck_dict.get('pt_pin')};"
-            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
-                         data={"chat_id": TG_CHAT_ID, "text": f"✅ <b>QQ 登录成功</b>\n<code>{res}</code>", "parse_mode": "HTML"})
+            cookies = await context.cookies()
+            ck_dict = {c['name']: c['value'] for c in cookies}
+            pt_key = ck_dict.get('pt_key')
+            if pt_key:
+                res = f"pt_key={pt_key};pt_pin={ck_dict.get('pt_pin', '')};"
+                requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
+                             data={"chat_id": TG_CHAT_ID, "text": f"✅ <b>QQ 登录成功</b>\n<code>{res}</code>", "parse_mode": "HTML"})
         else:
-            log("❌ 未获取到 pt_key")
+            log("❌ 最终未能捕获二维码")
+            await page.screenshot(path="final_fail.png")
+            send_tg_photo("final_fail.png", "⚠️ <b>捕获失败</b>\n请检查代理是否屏蔽了跳转请求")
 
         await browser.close()
 
