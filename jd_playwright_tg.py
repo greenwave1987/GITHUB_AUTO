@@ -30,84 +30,84 @@ async def run_qq_login():
             launch_args["proxy"] = {"server": PROXY_URL}
 
         browser = await p.chromium.launch(**launch_args)
+        
+        # 调高 context 默认超时
         context = await browser.new_context(viewport={'width': 1280, 'height': 800})
+        context.set_default_timeout(90000) # 全局 90 秒超时
+        
         page = await context.new_page()
 
-        log("🌐 访问京东登录页...")
-        await page.goto("https://passport.jd.com/new/login.aspx", wait_until="networkidle")
+        log("🌐 访问京东登录页 (宽松模式)...")
+        try:
+            # 修改点：改为 commit 模式，只要服务器响应就开始找按钮
+            await page.goto("https://passport.jd.com/new/login.aspx", wait_until="commit", timeout=60000)
+            log("✅ 页面已响应，等待 'QQ登录' 元素出现...")
+        except Exception as e:
+            log(f"❌ 访问京东超时: {e}")
+            await browser.close()
+            return
 
         # 1. 触发 QQ 登录弹窗
         qq_page = None
         try:
-            log("🖱️ 正在点击 'QQ登录' 按钮...")
-            # 使用你提供的特定 class 和文本进行定位
-            qq_btn = page.locator('a.pdl:has-text("QQ登录")')
+            # 精确选择器
+            qq_btn_selector = 'a.pdl:has-text("QQ登录")'
+            await page.wait_for_selector(qq_btn_selector, state="visible", timeout=30000)
             
-            # 确保按钮在视图中并点击，同时监听新弹出的窗口
+            log("鼠标点击 QQ 登录按钮...")
             async with page.expect_popup() as popup_info:
-                await qq_btn.click()
+                await page.click(qq_btn_selector)
             qq_page = await popup_info.value
-            log(f"✅ 已成功捕获 QQ 弹窗: {qq_page.url}")
+            
+            # 设置新页面的超时
+            qq_page.set_default_timeout(60000)
+            log(f"✅ 已捕获弹窗: {qq_page.url}")
         except Exception as e:
-            log(f"❌ 触发弹窗失败: {e}")
-            await page.screenshot(path="page_error.png")
-            send_tg_photo("page_error.png", "❌ 无法点击 QQ 登录按钮，请检查页面截图")
+            log(f"❌ 弹窗触发失败: {e}")
+            await page.screenshot(path="debug_main.png")
+            send_tg_photo("debug_main.png", "❌ 无法进入 QQ 登录流程")
             await browser.close()
             return
 
-        # 2. 在 QQ 弹窗中提取二维码
-        log("🔍 正在定位 QQ 二维码 (进入 Iframe)...")
+        # 2. 在弹窗内寻找二维码
+        log("🔍 正在 Iframe 中寻找二维码...")
         try:
-            # QQ 登录页的内容几乎都在这个 iframe 里
             iframe_selector = "#ptlogin_iframe"
-            await qq_page.wait_for_selector(iframe_selector, timeout=30000)
+            await qq_page.wait_for_selector(iframe_selector, timeout=45000)
             
             frame = qq_page.frame_locator(iframe_selector)
             
-            # 尝试定位二维码图片容器
-            qr_container = frame.locator(".qrlogin_img_out")
-            await qr_container.wait_for(state="visible", timeout=20000)
-            
-            # 强制等待图片 src 加载完成
-            qr_img = qr_container.locator("img#qrlogin_img")
-            await qr_img.wait_for(state="visible", timeout=10000)
+            # 兼容多种可能的二维码图片选择器
+            qr_img_selector = "#qrlogin_img"
+            await frame.locator(qr_img_selector).wait_for(state="visible", timeout=30000)
             
             log("📸 成功捕获 QQ 二维码！")
-            await qr_img.screenshot(path="qq_qr.png")
-            send_tg_photo("qq_qr.png", "🛡️ <b>京东 - QQ 扫码登录</b>\n请立即使用手机 QQ 扫码")
+            await frame.locator(qr_img_selector).screenshot(path="qq_qr.png")
+            send_tg_photo("qq_qr.png", "🛡️ <b>京东 QQ 扫码</b>\n请尽快扫码完成登录")
             
         except Exception as e:
             log(f"❌ 获取二维码失败: {e}")
-            await qq_page.screenshot(path="qq_diag.png")
-            send_tg_photo("qq_diag.png", f"❌ QQ 页面加载异常: {str(e)[:100]}")
+            await qq_page.screenshot(path="qq_error.png")
+            send_tg_photo("qq_error.png", f"❌ QQ 页面加载异常: {str(e)[:100]}")
             await browser.close()
             return
 
         # 3. 监控扫码状态
         log("📡 正在监控扫码结果 (180s)...")
         start_time = time.time()
-        last_log_url = ""
         while time.time() - start_time < 180:
-            current_url = page.url
-            if current_url != last_log_url:
-                log(f"🔗 当前主页面 URL: {current_url}")
-                last_log_url = current_url
-
-            # 登录成功的标志：跳转回京东首页或个人中心
-            if "jd.com" in current_url and "passport" not in current_url:
-                log("🎊 检测到成功跳转！")
+            # 只要主页面 URL 跳转，说明登录完成
+            if "jd.com" in page.url and "passport" not in page.url:
+                log("🎊 检测到主页面跳转成功！")
                 break
-            
-            # 如果 QQ 弹窗关闭了，也说明可能操作结束
             if qq_page.is_closed():
-                log("ℹ️ QQ 弹窗已关闭，准备提取 Cookie...")
+                log("ℹ️ QQ 弹窗已关闭")
                 break
-                
             await asyncio.sleep(5)
 
         # 4. 提取 Cookie
         log("🔍 正在提取 pt_key...")
-        await asyncio.sleep(5) # 等待数据写入
+        await asyncio.sleep(5)
         cookies = await context.cookies()
         ck_dict = {c['name']: c['value'] for c in cookies}
         
@@ -120,9 +120,7 @@ async def run_qq_login():
             requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
                          data={"chat_id": TG_CHAT_ID, "text": f"✅ <b>QQ 登录成功</b>\n\n<code>{res}</code>", "parse_mode": "HTML"})
         else:
-            log("⚠️ 未发现 pt_key，可能扫码被拦截或超时。")
-            await page.screenshot(path="final_state.png")
-            send_tg_photo("final_state.png", "⚠️ <b>登录结束但未提取到 pt_key</b>")
+            log("⚠️ 未能提取到关键 Cookie")
 
         await browser.close()
 
@@ -130,4 +128,4 @@ if __name__ == "__main__":
     if TG_TOKEN and TG_CHAT_ID:
         asyncio.run(run_qq_login())
     else:
-        log("❌ 缺失 TG 环境变量")
+        log("❌ 缺失环境变量")
