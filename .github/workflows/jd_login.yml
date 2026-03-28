@@ -1,0 +1,32 @@
+name: JD Playwright Login
+
+on:
+  workflow_dispatch: # 手动触发运行
+
+jobs:
+  login_job:
+    runs-on: ubuntu-latest
+    
+    # 在这里定义全局环境变量，确保脚本能读取到 Secrets
+    env:
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TG_USER_ID: ${{ secrets.TG_USER_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright requests
+          # 核心步骤：安装 chromium 浏览器及其系统级依赖库
+          playwright install chromium --with-deps
+
+      - name: Run JD Login Script
+        run: python jd_playwright_tg.py
