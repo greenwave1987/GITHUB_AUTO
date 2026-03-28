@@ -10,7 +10,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 TG_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
-PROXY_URL = os.getenv("PROXY_URL")
+PROXY_URL = "socks5://greenwave1987.iask.in:19873"#os.getenv("PROXY_URL")
 
 def log(msg):
     timestamp = time.strftime('%H:%M:%S')
