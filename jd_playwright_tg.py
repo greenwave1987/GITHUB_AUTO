@@ -74,17 +74,45 @@ async def run_jd_login():
             await page.screenshot(path="init.png")
             send_tg_photo("init.png", "📡 <b>初始化监控</b>\n页面已打开，正在生成二维码...")
 
-            # 3. 寻找二维码
+            # 3. 寻找二维码 (核心修复段)
             qr_selector = "#passport-main-qrcode-img"
             try:
+                # 等待 20 秒，给代理一点时间加载
                 await page.wait_for_selector(qr_selector, timeout=20000)
-                await page.locator(qr_selector).screenshot(path="qrcode.png")
-                log("📸 二维码捕获成功！")
-                send_tg_photo("qrcode.png", "✅ <b>京东二维码</b>\n请立即扫码，监控已开启...")
-            except:
-                log("⚠️ 未发现二维码元素，发送实时截图排查...")
+                
+                # --- 黑科技：注入 JS 脚本，强制删除京东的刷新遮罩层 ---
+                log("🚫 正在强制移除二维码遮罩层...")
+                try:
+                    # 这个选择器通常对应遮挡二维码的那个透明方块
+                    await page.evaluate("""() => {
+                        const mask = document.querySelector('.qrcode-pnl .qrcode-msg');
+                        if (mask) {
+                            mask.style.display = 'none'; // 隐藏遮罩
+                            mask.remove(); // 强制删除元素
+                        }
+                        const qrImg = document.querySelector('#passport-main-qrcode-img');
+                        if (qrImg) {
+                            qrImg.style.opacity = 1; // 确保图片本身是可见的
+                        }
+                    }""")
+                exceptException as js_e:
+                    log(f"⚠️ 移除遮罩失败 (非致命): {js_e}")
+    
+                # --- 修改截图方式：不再只截元素，而是截全屏后再裁剪 ---
+                log("📸 正在截取完整的二维码区域...")
+                # 我们截取全屏，因为全屏截图是不受 HTML 遮罩影响的（如果遮罩已被删除）
+                await page.screenshot(path="full_qrcode.png")
+                
+                # 或者：如果上面的 JS 删除了遮罩，这里就可以再次尝试元素截图
+                # await page.locator(qr_selector).screenshot(path="qrcode.png")
+                
+                log("📸 二维码已清理，发送至 TG...")
+                send_tg_photo("full_qrcode.png", "✅ <b>京东二维码 (已强制清理遮罩)</b>\n请立即扫码")
+    
+            except Exception as e:
+                log(f"❌ 无法定位二维码元素: {e}")
                 await page.screenshot(path="not_found.png")
-                send_tg_photo("not_found.png", "⚠️ <b>未发现二维码元素</b>\n请检查页面是否出现了滑块或报错。")
+                send_tg_photo("not_found.png", "⚠️ <b>无法加载二维码</b>\n代理可能太慢或已失效。")
 
             # 4. 实时循环监控
             log("📡 进入扫码状态监控 (120秒)...")
