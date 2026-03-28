@@ -7,7 +7,7 @@ from playwright.async_api import async_playwright
 
 # 从环境变量获取配置
 TG_TOKEN = os.getenv("TG_BOT_TOKEN")
-TG_ID = os.getenv("TG_USER_ID")
+TG_ID = os.getenv("TG_CHAT_ID")
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}")
