@@ -10,7 +10,7 @@ jobs:
     # 在这里定义全局环境变量，确保脚本能读取到 Secrets
     env:
       TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-      TG_USER_ID: ${{ secrets.TG_USER_ID }}
+      TG_USER_ID: ${{ secrets.TG_CHAT_ID }}
 
     steps:
       - name: Checkout code
