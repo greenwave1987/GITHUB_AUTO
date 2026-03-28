@@ -5,7 +5,6 @@ import requests
 import sys
 from playwright.async_api import async_playwright
 
-# 实时日志输出
 sys.stdout.reconfigure(line_buffering=True)
 
 TG_TOKEN = os.getenv("TG_BOT_TOKEN")
@@ -31,78 +30,86 @@ async def run_qq_login():
 
         browser = await p.chromium.launch(**launch_args)
         context = await browser.new_context(viewport={'width': 1280, 'height': 800})
-        context.set_default_timeout(90000)
+        # 统一全局超时为 100 秒，应对慢速代理
+        context.set_default_timeout(100000)
         page = await context.new_page()
 
         log("🌐 访问京东登录页...")
+        await page.goto("https://passport.jd.com/new/login.aspx", wait_until="domcontentloaded")
+
+        # 1. 点击 QQ 登录
         try:
-            await page.goto("https://passport.jd.com/new/login.aspx", wait_until="domcontentloaded", timeout=60000)
+            qq_btn = page.locator('a.pdl:has-text("QQ登录")')
+            await qq_btn.wait_for(state="visible", timeout=30000)
+            log("🖱️ 点击 QQ 登录按钮...")
+            
+            # 点击后立即监听 URL 变化，wait_until="commit" 是关键
+            await page.click('a.pdl:has-text("QQ登录")')
+            log("📡 正在等待 URL 跳转 (commit 模式)...")
+            await page.wait_for_url("**/qq.com/**", wait_until="commit", timeout=60000)
+            log(f"✅ 已检测到重定向至: {page.url}")
         except Exception as e:
-            log(f"❌ 访问超时: {e}")
+            log(f"❌ 跳转判定失败: {e}")
+            await page.screenshot(path="jump_fail.png")
+            send_tg_photo("jump_fail.png", "❌ 跳转 QQ 页面超时或失败")
             await browser.close()
             return
 
-        # 1. 直接在当前窗口点击 QQ 登录
-        try:
-            qq_btn_selector = 'a.pdl:has-text("QQ登录")'
-            log("🖱️ 等待并点击 QQ 登录按钮 (当前窗口跳转)...")
-            await page.wait_for_selector(qq_btn_selector, state="visible", timeout=30000)
+        # 2. 寻找 QQ 二维码 (增加循环探测，防止 iframe 还没挂载)
+        log("🔍 正在探测 QQ 登录 Iframe...")
+        qr_img = None
+        iframe_selector = "#ptlogin_iframe"
+        
+        # 尝试循环 15 次探测 iframe 和里面的二维码
+        for i in range(1, 16):
+            try:
+                # 检查 iframe 是否存在
+                if await page.query_selector(iframe_selector):
+                    frame = page.frame_locator(iframe_selector)
+                    # 尝试寻找二维码图片
+                    target_qr = frame.locator("#qrlogin_img")
+                    if await target_qr.is_visible():
+                        qr_img = target_qr
+                        log(f"✅ 第 {i} 次探测：成功发现二维码！")
+                        break
+                
+                # 如果没找到，检查是否需要点击“二维码登录”切换按钮
+                # 有些页面默认显示账号密码，需要点一下左下角图标
+                switch_btn = page.frame_locator(iframe_selector).locator("#qr_switch_logo")
+                if await switch_btn.is_visible():
+                    await switch_btn.click()
+                    log("🖱️ 检测到账号模式，已手动切换至二维码模式")
+            except:
+                pass
             
-            # 点击并等待 URL 发生变化（跳转到 qq.com）
-            await page.click(qq_btn_selector)
-            log("📡 已点击，正在等待页面重定向至 QQ...")
-            
-            # 等待 URL 包含 qq.com
-            await page.wait_for_url("**/qq.com/**", timeout=60000)
-            log(f"✅ 已进入 QQ 登录页: {page.url}")
-        except Exception as e:
-            log(f"❌ 跳转 QQ 页面失败: {e}")
-            await page.screenshot(path="jump_error.png")
-            send_tg_photo("jump_error.png", "❌ 点击 QQ 登录后未成功跳转")
+            log(f"⏳ 第 {i} 次探测中，等待二维码渲染...")
+            await asyncio.sleep(4)
+
+        if qr_img:
+            # 截图并发送
+            await qr_img.screenshot(path="qq_qr.png")
+            send_tg_photo("qq_qr.png", "🛡️ <b>京东 QQ 扫码</b>\n请尽快扫码完成登录")
+        else:
+            log("❌ 探测结束，未能捕获二维码")
+            await page.screenshot(path="detect_fail.png")
+            send_tg_photo("detect_fail.png", "⚠️ <b>无法定位 QQ 二维码</b>\n请检查截图排查是否有验证码拦截")
             await browser.close()
             return
 
-        # 2. 定位 iframe 里的二维码
-        log("🔍 正在寻找 QQ 二维码 (Iframe)...")
-        try:
-            # 这里的 iframe ID 在重定向模式下通常保持一致
-            iframe_selector = "#ptlogin_iframe"
-            await page.wait_for_selector(iframe_selector, timeout=45000)
-            
-            frame = page.frame_locator(iframe_selector)
-            
-            # 寻找二维码图片元素
-            qr_img_selector = "#qrlogin_img"
-            await frame.locator(qr_img_selector).wait_for(state="visible", timeout=30000)
-            
-            # 截图
-            log("📸 成功捕获 QQ 二维码！")
-            await frame.locator(qr_img_selector).screenshot(path="qq_qr.png")
-            send_tg_photo("qq_qr.png", "🛡️ <b>京东 QQ 扫码 (重定向版)</b>\n请尽快扫码")
-            
-        except Exception as e:
-            log(f"❌ 获取二维码失败: {e}")
-            await page.screenshot(path="qq_page_diag.png")
-            send_tg_photo("qq_page_diag.png", f"❌ QQ 页面二维码加载异常")
-            await browser.close()
-            return
-
-        # 3. 监控跳转回京东 (登录成功)
-        log("📡 正在监控扫码结果...")
+        # 3. 监控扫码结果
+        log("📡 监控扫码跳转 (180s)...")
         start_time = time.time()
         while time.time() - start_time < 180:
-            # 如果 URL 回到了 jd.com 且不再是 passport，说明成功
             if "jd.com" in page.url and "passport" not in page.url:
-                log(f"🎊 登录成功，当前 URL: {page.url}")
+                log("🎊 登录成功跳转！")
                 break
             await asyncio.sleep(5)
 
         # 4. 提取 Cookie
-        log("🔍 提取 pt_key...")
+        log("🔍 提取最终 Cookie...")
         await asyncio.sleep(5)
         cookies = await context.cookies()
         ck_dict = {c['name']: c['value'] for c in cookies}
-        
         pt_key = ck_dict.get('pt_key')
         pt_pin = ck_dict.get('pt_pin') or ck_dict.get('pin')
 
@@ -110,8 +117,9 @@ async def run_qq_login():
             res = f"pt_key={pt_key};pt_pin={pt_pin};"
             requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
                          data={"chat_id": TG_CHAT_ID, "text": f"✅ <b>QQ 登录成功</b>\n<code>{res}</code>", "parse_mode": "HTML"})
+            log(f"🎉 任务圆满完成: {pt_pin}")
         else:
-            log("⚠️ 未能提取到 Cookie，请检查跳转是否彻底完成")
+            log("❌ 获取 pt_key 失败")
 
         await browser.close()
 
