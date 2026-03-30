@@ -62,7 +62,24 @@ def get_tg_code():
 async def run_qq_login():
     async with async_playwright() as p:
         log("🚀 启动 Chromium...")
-        launch_args = {"headless": True}
+        launch_args = {
+            "headless": True,
+            "args": [
+                # --- 基础运行保障 ---
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-gpu", # GitHub 环境建议保留，但必须配合 JS 伪造指纹
+                
+                # --- 核心防检测逻辑 ---
+                "--disable-blink-features=AutomationControlled", # 抹除 navigator.webdriver 标志
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "--window-size=1280,720",
+                "--lang=zh-CN",
+            ]
+        }
         if PROXY_URL:
             launch_args["proxy"] = {"server": PROXY_URL}
 
