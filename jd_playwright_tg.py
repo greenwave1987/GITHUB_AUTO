@@ -114,12 +114,25 @@ async def run_qq_login():
         start_time = time.time()
         voice_triggered = False
         login_success = False
+        account_locked = False
 
         while time.time() - start_time < 600:
             current_url = page.url
             
-            # 检测安全验证
+            # --- 新增：黑屋/风控检测 ---
             if "aq.jd.com" in current_url:
+                # 检查是否存在“暂无法在京东网页端使用”的警告
+                lock_msg_locator = page.locator("h5.tip-title")
+                if await lock_msg_locator.is_visible():
+                    lock_text = await lock_msg_locator.inner_text()
+                    if "暂无法在京东网页端使用" in lock_text:
+                        log(f"❌ 账号风险拦截: {lock_text}")
+                        await page.screenshot(path="account_locked.png")
+                        send_tg_photo("account_locked.png", f"🚫 <b>账号安全拦截</b>\n\n{lock_text}\n\n⚠️ 此账号已被网页端锁定，脚本无法继续，请前往 APP 处理。")
+                        account_locked = True
+                        break
+
+                # 原有的语音验证触发逻辑
                 voice_btn = page.locator("button.btn-voice:has-text('获取语音验证码')")
                 if await voice_btn.is_visible() and not voice_triggered:
                     log("🖱️ 点击‘获取语音验证码’...")
@@ -130,7 +143,7 @@ async def run_qq_login():
                     await page.screenshot(path="voice_sent.png")
                     send_tg_photo("voice_sent.png", "📞 验证界面截图")
 
-                # 监听验证码
+                # 原有的验证码填入逻辑
                 input_selector = "input.field[placeholder='请输入手机验证码']"
                 if await page.locator(input_selector).is_visible():
                     code = get_tg_code()
@@ -141,23 +154,20 @@ async def run_qq_login():
                         submit_btn = page.locator("button.btn-primary:has-text('提交认证')")
                         if await submit_btn.is_visible():
                             await submit_btn.click()
-                            send_tg_msg("✅ 已点击提交，等待结果...")
                             await asyncio.sleep(10)
 
-            # 判定成功
-            if "jd.com" in current_url and ("home" in current_url or "myJd" in current_url or "index" in current_url):
-                if "passport" not in current_url:
-                    log(f"🎊 登录成功: {current_url}")
-                    login_success = True
-                    break
+            # 判定真正的成功（排除掉仍在验证页的情况）
+            if "jd.com" in current_url and ("home" in current_url or "myJd" in current_url) and "aq.jd.com" not in current_url:
+                log(f"🎊 登录成功: {current_url}")
+                login_success = True
+                break
                 
             await asyncio.sleep(5)
 
-        # 4. 提取 Cookie
-        if login_success:
+        # 4. 提取 Cookie (增加锁定状态判断)
+        if login_success and not account_locked:
             log("⏳ 提取最终 Cookie...")
             await asyncio.sleep(15)
-            # 尝试访问个人中心确保 CK 刷新
             try: await page.goto("https://home.m.jd.com/myJd/home.action", timeout=60000)
             except: pass
             
@@ -167,9 +177,10 @@ async def run_qq_login():
             if pt_key:
                 res = f"pt_key={pt_key};pt_pin={ck_dict.get('pt_pin','')};"
                 send_tg_msg(f"✅ <b>京东登录成功</b>\n<code>{res}</code>")
+        elif account_locked:
+            log("🛑 任务因账号风控锁定而终止。")
         else:
             log("❌ 任务结束，未成功登录。")
-            await page.screenshot(path="final_fail.png")
 
         await browser.close()
 
