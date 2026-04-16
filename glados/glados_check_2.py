@@ -64,7 +64,7 @@ def generate_trend_chart(points_data, email):
         for i in reversed(history)
     ]
     balances = [
-        float(i['change'])
+        float(i['change']) if float(i['change']) >= 0 else float(i['change']/100)
         for i in reversed(history)
     ]
 
