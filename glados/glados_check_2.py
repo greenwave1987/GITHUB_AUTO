@@ -15,7 +15,7 @@ CONSOLE_URL = "https://glados.cloud/console/account"
 STATUS_API = "https://glados.cloud/api/user/status"
 POINTS_API = "https://glados.cloud/api/user/points"
 CHECKIN_API = "https://glados.cloud/api/user/checkin"
-TRAFFIC_API = "https://glados.cloud/api/user/traffic"  # 新增：流量接口
+TRAFFIC_API = "https://glados.cloud/api/user/traffic"
 
 EMAILS = os.environ["GLADOS_EMAIL"].split(",")
 
@@ -350,12 +350,10 @@ def run():
                     )
 
                     traffic_info = "未知"
-                    if traffic_json.get("code") == 0:
-                        data = traffic_json.get("data", {})
-                        used_gb = data.get("today", 0) / (1024**3)  # Byte转GB
-                        limit_gb = data.get("limit", 0) / 100 layer  # 假设limit单位是MB转GB，或根据实际调整为1024
-                        # 修正换算：如果API limit是1000表示10GB，通常是按MB计
-                        limit_gb = data.get("limit", 0) / 100 
+                    if traffic_json and traffic_json.get("code") == 0:
+                        t_data = traffic_json.get("data", {})
+                        used_gb = t_data.get("today", 0) / (1024**3)
+                        limit_gb = t_data.get("limit", 0) / 100 
                         traffic_info = f"{used_gb:.2f} GB / {limit_gb:.0f} GB"
                     # ----------------------
 
