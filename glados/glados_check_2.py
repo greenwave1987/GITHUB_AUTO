@@ -15,6 +15,7 @@ CONSOLE_URL = "https://glados.cloud/console/account"
 STATUS_API = "https://glados.cloud/api/user/status"
 POINTS_API = "https://glados.cloud/api/user/points"
 CHECKIN_API = "https://glados.cloud/api/user/checkin"
+TRAFFIC_API = "https://glados.cloud/api/user/traffic"  # 新增：流量接口
 
 EMAILS = os.environ["GLADOS_EMAIL"].split(",")
 
@@ -338,6 +339,26 @@ def run():
                         )
                     )
 
+                    # --- 新增流量数据抓取 ---
+                    traffic_json = page.evaluate(
+                        f'''
+                        async () => {{
+                            const r = await fetch("{TRAFFIC_API}");
+                            return await r.json();
+                        }}
+                        '''
+                    )
+
+                    traffic_info = "未知"
+                    if traffic_json.get("code") == 0:
+                        data = traffic_json.get("data", {})
+                        used_gb = data.get("today", 0) / (1024**3)  # Byte转GB
+                        limit_gb = data.get("limit", 0) / 100 layer  # 假设limit单位是MB转GB，或根据实际调整为1024
+                        # 修正换算：如果API limit是1000表示10GB，通常是按MB计
+                        limit_gb = data.get("limit", 0) / 100 
+                        traffic_info = f"{used_gb:.2f} GB / {limit_gb:.0f} GB"
+                    # ----------------------
+
                     chart_path = generate_trend_chart(
                         points_json,
                         email
@@ -346,6 +367,7 @@ def run():
                     summary = (
                         f"🎉 {email} 签到成功\n"
                         f"⏳ 剩余: {left_days} 天\n"
+                        f"📊 流量: {traffic_info}\n"
                         f"💰 积分: {total_points}"
                     )
 
