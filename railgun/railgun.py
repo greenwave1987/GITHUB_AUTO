@@ -152,7 +152,7 @@ def check_session_by_points(page):
             }}
             '''
         )
-        print("POINTS_API:{result}")
+        print(f"POINTS_API:{result}")
         return result and result.get('code') == 0
     except:
         return False
