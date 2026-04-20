@@ -118,7 +118,7 @@ def update_secret(name, value):
 
 def tg_wait_code(email, send_time, timeout=300):
     masked = mask_email(email)
-    tg_send(f"📨 GLaDOS 验证码\n账号: {masked}\n回复：/code 123456")
+    tg_send(f"📨 RAILGUN 验证码\n账号: {masked}\n回复：/code 123456")
 
     offset = None
     start_wait = time.time()
@@ -159,8 +159,8 @@ def check_session_by_points(page):
 # ================= 主程序 =================
 
 def run():
-    print("====== GLaDOS 自动签到开始 ======")
-    local_raw = os.environ.get("GLADOS_LOCAL", "{}")
+    print("====== RAILGUN 自动签到开始 ======")
+    local_raw = os.environ.get("RAILGUN_LOCAL", "{}")
     try:
         local_storage_dict = json.loads(local_raw)
         if not isinstance(local_storage_dict, dict):
@@ -227,12 +227,15 @@ def run():
                     )
 
                     status_json = page.evaluate(f'async () => {{ const r = await fetch("{STATUS_API}"); return await r.json(); }}')
+                    print(f"STATUS_API[{status_json}] ")
                     left_days = int(float(status_json['data'].get('leftDays', 0)))
 
                     points_json = page.evaluate(f'async () => {{ const r = await fetch("{POINTS_API}"); return await r.json(); }}')
+                    print(f"POINTS_API[{points_json}] ")
                     total_points = int(float(points_json.get('points', 0)))
 
                     traffic_json = page.evaluate(f'async () => {{ const r = await fetch("{TRAFFIC_API}"); return await r.json(); }}')
+                    print(f"TRAFFIC_API[{traffic_json}] ")
                     traffic_info = "未知"
                     if traffic_json and traffic_json.get("code") == 0:
                         t_data = traffic_json.get("data", {})
@@ -267,10 +270,10 @@ def run():
 
         browser.close()
 
-    old = os.environ.get("GLADOS_LOCAL", "{}")
+    old = os.environ.get("RAILGUN_LOCAL", "{}")
     new = json.dumps(final_storage_dict)
     if old != new:
-        update_secret("GLADOS_LOCAL", new)
+        update_secret("RAILGUN_LOCAL", new)
     print("====== 任务结束 ======")
 
 if __name__ == "__main__":
