@@ -17,6 +17,7 @@ STATUS_API = "https://railgun.info/api/user/status"
 POINTS_API = "https://railgun.info/api/user/points"
 CHECKIN_API = "https://railgun.info/api/user/checkin"
 TRAFFIC_API = "https://railgun.info/api/user/traffic"
+ASSERT_API = "https://railgun.info/api/user/assets"
 
 EMAILS = os.environ["GLADOS_EMAIL"].split(",")
 
@@ -232,6 +233,11 @@ def run():
                     left_days = 0
                     if status_json and status_json.get("code") == 0:
                         left_days = int(float(status_json['data'].get('leftDays', 0)))
+                    else:
+                        status_json = page.evaluate(f'async () => {{ const r = await fetch("{ASSERT_API}"); return await r.json(); }}')
+                        print(f"ASSERT_API[{status_json}] ")
+                        if status_json and status_json.get("code") == 0:
+                            left_days = int(float(status_json['data'].get('days', 0)))
 
                     points_json = page.evaluate(f'async () => {{ const r = await fetch("{POINTS_API}"); return await r.json(); }}')
                     print(f"POINTS_API[{points_json}] ")
