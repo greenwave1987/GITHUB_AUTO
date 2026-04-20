@@ -229,11 +229,13 @@ def run():
 
                     status_json = page.evaluate(f'async () => {{ const r = await fetch("{STATUS_API}"); return await r.json(); }}')
                     print(f"STATUS_API[{status_json}] ")
+                    left_days = 0
                     if status_json and status_json.get("code") == 0:
                         left_days = int(float(status_json['data'].get('leftDays', 0)))
 
                     points_json = page.evaluate(f'async () => {{ const r = await fetch("{POINTS_API}"); return await r.json(); }}')
                     print(f"POINTS_API[{points_json}] ")
+                    total_points=0
                     if points_json and points_json.get("code") == 0:
                         total_points = int(float(points_json.get('points', 0)))
                         chart_path = generate_trend_chart(points_json, email)
