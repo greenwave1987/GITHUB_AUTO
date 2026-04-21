@@ -149,10 +149,10 @@ def process_account(browser, email, current_storage):
 
     try:
         page.goto(CONSOLE_URL, wait_until="networkidle")
-        points_check = api_fetch(page, API_MAP["points"])
+        status_data = api_fetch(page, API_MAP["status"])
         
         # 登录失效判断
-        if not points_check or points_check.get('code') != 0:
+        if not status_data or status_data.get('code') == -2:
             print(f"[{masked}] Session失效，尝试登录...")
             page.goto(LOGIN_URL)
             page.fill("#email", email)
@@ -179,7 +179,11 @@ def process_account(browser, email, current_storage):
         msg = "✅ 签到成功" if checkin_res.get("code") == 0 else "⚠️ 今日已签到"
         
         # 获取汇总数据
-        status_data = api_fetch(page, API_MAP["status"]).get("data", {})
+        if status_data and status_data.get('code') == -2:
+            status_data = api_fetch(page, API_MAP["status"]).get("data", {})
+        if status_data and status_data.get('code') == -100:
+            msg += f"\n⚠️ {status_data.get('boarding')}，需要激活码！"
+
         points_data = api_fetch(page, API_MAP["points"])
         traffic_data = api_fetch(page, API_MAP["traffic"]).get("data", {})
 
