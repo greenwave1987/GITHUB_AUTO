@@ -33,4 +33,4 @@ jobs:
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          python -u glados/glados_check_2.py
+          python -u glados/glados_check.py
