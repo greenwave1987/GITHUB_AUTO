@@ -6,7 +6,7 @@ on:
     - cron: "0 3 * * *"
 
 jobs:
-  glados:
+  GLaDOS:
     runs-on: ubuntu-latest
 
     steps:
