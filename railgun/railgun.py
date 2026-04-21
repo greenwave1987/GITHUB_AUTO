@@ -230,15 +230,17 @@ def run():
                         }}
                         '''
                     )
-                    
-                    print(f"CHECKIN_API[{checkin_res}]")
-                    
+                                      
+                    checkin_msg=''
                     if checkin_res.get("code") == 0:
                         print(f'[{masked}] ✅ 签到成功，获得{checkin_res.get("points")}积分！')
+                        checkin_msg=f' ✅ 签到成功，获得{checkin_res.get("points")}积分！'
                     elif checkin_res.get("code") == -100:
-                        print(f"[{masked}] ⚠️ 已签到")
+                        print(f" ⚠️ 已签到！")
+                        checkin_msg=f" ⚠️ 已签到!"
                     else:
                         print(f"[{masked}] ❌ 签到失败 {checkin_res}")
+                        checkin_msg=f"[{masked}] ❌ 签到失败!"
 
                     status_json = page.evaluate(f'async () => {{ const r = await fetch("{STATUS_API}"); return await r.json(); }}')
                     print(f"STATUS_API[{status_json}] ")
@@ -269,7 +271,7 @@ def run():
 
                     
                     summary = (
-                        f"🎉 {masked} 签到成功\n"
+                        f"{checkin_msg} \n"
                         f"⏳ 剩余: {left_days} 天\n"
                         f"📊 流量: {traffic_info}\n"
                         f"💰 积分: {total_points}"
