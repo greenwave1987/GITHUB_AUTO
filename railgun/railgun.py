@@ -8,18 +8,19 @@ from nacl import encoding, public
 from playwright.sync_api import sync_playwright
 import matplotlib.pyplot as plt
 from datetime import datetime
-
+host='railgun.info'
+ENV_NAME='RAILGUN'
 # ================= 配置 =================
-LOGIN_URL = "https://railgun.info/login"
-CONSOLE_URL = "https://railgun.info/console/account"
+LOGIN_URL = f"https://{host}/login"
+CONSOLE_URL = f"https://{host}/console/account"
 
-STATUS_API = "https://railgun.info/api/user/status"
-POINTS_API = "https://railgun.info/api/user/points"
-CHECKIN_API = "https://railgun.info/api/user/checkin"
-TRAFFIC_API = "https://railgun.info/api/user/traffic"
-ASSERT_API = "https://railgun.info/api/user/assets"
+STATUS_API = f"https://{host}/api/user/status"
+POINTS_API = f"https://{host}/api/user/points"
+CHECKIN_API = f"https://{host}/api/user/checkin"
+TRAFFIC_API = f"https://{host}/api/user/traffic"
+ASSERT_API = f"https://{host}/api/user/assets"
 
-EMAILS = os.environ["GLADOS_EMAIL"].split(",")
+EMAILS = os.environ[f"{ENV_NAME}_EMAIL"].split(",")
 
 TG_TOKEN = os.environ["TG_BOT_TOKEN"]
 TG_CHAT_ID = os.environ["TG_CHAT_ID"]
@@ -119,7 +120,7 @@ def update_secret(name, value):
 
 def tg_wait_code(email, send_time, timeout=300):
     masked = mask_email(email)
-    tg_send(f"📨 RAILGUN 验证码\n账号: {masked}\n回复：/code 123456")
+    tg_send(f"📨 {ENV_NAME} 验证码\n账号: {masked}\n回复：/code 123456")
 
     offset = None
     start_wait = time.time()
@@ -153,7 +154,6 @@ def check_session_by_points(page):
             }}
             '''
         )
-        print(f"POINTS_API:{result}")
         return result and result.get('code') == 0
     except:
         return False
@@ -161,8 +161,8 @@ def check_session_by_points(page):
 # ================= 主程序 =================
 
 def run():
-    print("====== RAILGUN 自动签到开始 ======")
-    local_raw = os.environ.get("RAILGUN_LOCAL", "{}")
+    print(f"====== {ENV_NAME} 自动签到开始 ======")
+    local_raw = os.environ.get(f"{ENV_NAME}_LOCAL", "{}")
     try:
         local_storage_dict = json.loads(local_raw)
         if not isinstance(local_storage_dict, dict):
@@ -224,50 +224,57 @@ def run():
                             const r = await fetch("{CHECKIN_API}", {{
                                 method:"POST",
                                 headers:{{"content-type":"application/json"}},
-                                body:JSON.stringify({{token:"railgun.info"}})
+                                body:JSON.stringify({{token:"{host}"}})
                             }});
                             return await r.json();
                         }}
                         '''
                     )
-                                      
+                    
+                    #print(f"CHECKIN_API[{checkin_res}]")
                     checkin_msg=''
                     if checkin_res.get("code") == 0:
                         print(f'[{masked}] ✅ 签到成功，获得{checkin_res.get("points")}积分！')
                         checkin_msg=f' ✅ 签到成功，获得{checkin_res.get("points")}积分！'
-                    elif checkin_res.get("code") == -100:
-                        print(f" ⚠️ 已签到！")
-                        checkin_msg=f" ⚠️ 已签到!"
+                    elif checkin_res.get("code") == 1:
+                        print(f' ⚠️ 已签到，获得{checkin_res["list"][0]["change"]}积分！')
+                        checkin_msg=f' ⚠️ 已签到，获得{checkin_res["list"][0]["change"]}积分！'
                     else:
                         print(f"[{masked}] ❌ 签到失败 {checkin_res}")
-                        checkin_msg=f"[{masked}] ❌ 签到失败!"
-
+                        checkin_msg=f"[{masked}] ❌ 签到失败"
+                    
                     status_json = page.evaluate(f'async () => {{ const r = await fetch("{STATUS_API}"); return await r.json(); }}')
-                    print(f"STATUS_API[{status_json}] ")
                     left_days = 0
                     if status_json and status_json.get("code") == 0:
                         left_days = int(float(status_json['data'].get('leftDays', 0)))
                     else:
+                        print(f"STATUS_API[{status_json}] ")
                         status_json = page.evaluate(f'async () => {{ const r = await fetch("{ASSERT_API}"); return await r.json(); }}')
-                        print(f"ASSERT_API[{status_json}] ")
+                        
                         if status_json and status_json.get("code") == 0:
                             left_days = int(float(status_json['data'].get('days', 0)))
+                        else:
+                            print(f"ASSERT_API:[{status_json}] ")
 
                     points_json = page.evaluate(f'async () => {{ const r = await fetch("{POINTS_API}"); return await r.json(); }}')
-                    print(f"POINTS_API[{points_json}] ")
+                    
                     total_points=0
                     if points_json and points_json.get("code") == 0:
                         total_points = int(float(points_json.get('points', 0)))
                         chart_path = generate_trend_chart(points_json, email)
+                    else:
+                        print(f"POINTS_API[{points_json}] ")
+                        
 
                     traffic_json = page.evaluate(f'async () => {{ const r = await fetch("{TRAFFIC_API}"); return await r.json(); }}')
-                    print(f"TRAFFIC_API[{traffic_json}] ")
                     traffic_info = "未知"
                     if traffic_json and traffic_json.get("code") == 0:
                         t_data = traffic_json.get("data", {})
                         used_gb = t_data.get("today", 0) / (1024**3)
                         limit_gb = t_data.get("limit", 0) / 100 
                         traffic_info = f"{used_gb:.2f} GB / {limit_gb:.0f} GB"
+                    else:
+                        print(f"TRAFFIC_API[{traffic_json}] ")
 
                     
                     summary = (
@@ -296,10 +303,10 @@ def run():
 
         browser.close()
 
-    old = os.environ.get("RAILGUN_LOCAL", "{}")
+    old = os.environ.get(f"{ENV_NAME}_LOCAL", "{}")
     new = json.dumps(final_storage_dict)
     if old != new:
-        update_secret("RAILGUN_LOCAL", new)
+        update_secret(f"{ENV_NAME}_LOCAL", new)
     print("====== 任务结束 ======")
 
 if __name__ == "__main__":
