@@ -183,7 +183,7 @@ def process_account(browser, email, current_storage):
             status_data = api_fetch(page, API_MAP["status"]).get("data", {})
         if status_data and status_data.get('code') == -100:
             msg += f"\n⚠️ {status_data.get('boarding')}，需要激活码！"
-        url = ""
+        url = "null"
         if status_data and status_data.get('code') == 0:
             d = status_data["data"]
             site = d.get("site")
