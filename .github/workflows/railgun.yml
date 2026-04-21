@@ -24,13 +24,13 @@ jobs:
           python -u -m pip install playwright requests pynacl matplotlib
           python -u -m playwright install chromium
 
-      - name: Run GLaDOS auto login & checkin
+      - name: Run RailGun auto login & checkin
         env:
-          GLADOS_EMAIL: ${{ vars.GLADOS_EMAIL }}
+          GLADOS_EMAIL: ${{ vars.RAILGUN_EMAIL }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           RAILGUN_LOCAL: ${{ secrets.RAILGUN_LOCAL }}
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          python -u railgun/railgun.py
+          python -u railgun/railgun_1.py
