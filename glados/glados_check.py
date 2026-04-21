@@ -224,7 +224,7 @@ def run():
                             const r = await fetch("{CHECKIN_API}", {{
                                 method:"POST",
                                 headers:{{"content-type":"application/json"}},
-                                body:JSON.stringify({{token:host}})
+                                body:JSON.stringify({{token:"{host}"}})
                             }});
                             return await r.json();
                         }}
