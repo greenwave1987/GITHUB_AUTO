@@ -105,7 +105,7 @@ def generate_trend_chart(points_data, email):
     if not history: return None
     recent_history = list(reversed(history))[:15]
     dates = [datetime.fromtimestamp(i['time']/1000).strftime('%m-%d') for i in recent_history]
-    balances = [float(i.get('change', 0)) for i in recent_history]
+    balances = [float(i.get('change', 0)) / 100 if float(i.get('change', 0)) < 0 else float(i.get('change', 0)) for i in recent_history]
     plt.figure(figsize=(10, 5))
     plt.plot(dates, balances, marker='o', color='#2196F3', linewidth=2)
     plt.fill_between(dates, balances, color='#2196F3', alpha=0.1)
