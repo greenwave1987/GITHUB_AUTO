@@ -234,11 +234,13 @@ def run():
                     #print(f"CHECKIN_API[{checkin_res}]")
                     checkin_msg=''
                     if checkin_res.get("code") == 0:
-                        print(f'[{masked}] ✅ 签到成功，获得{checkin_res.get("points")}积分！')
-                        checkin_msg=f' ✅ 签到成功，获得{checkin_res.get("points")}积分！'
+                        points=int(float(checkin_res.get("points")))
+                        print(f'[{masked}] ✅ 签到成功，获得{points}积分！')
+                        checkin_msg=f' ✅ 签到成功，获得{points}积分！'
                     elif checkin_res.get("code") == 1:
-                        print(f' ⚠️ 已签到，获得{checkin_res["list"][0]["change"]}积分！')
-                        checkin_msg=f' ⚠️ 已签到，获得{checkin_res["list"][0]["change"]}积分！'
+                        points=int(float(checkin_res["list"][0]["change"]))
+                        print(f' ⚠️ 已签到，获得{points}积分！')
+                        checkin_msg=f' ⚠️ 已签到，获得{points}积分！'
                     else:
                         print(f"[{masked}] ❌ 签到失败 {checkin_res}")
                         checkin_msg=f"[{masked}] ❌ 签到失败"
