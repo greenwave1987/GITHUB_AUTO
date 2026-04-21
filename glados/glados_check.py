@@ -183,6 +183,23 @@ def process_account(browser, email, current_storage):
             status_data = api_fetch(page, API_MAP["status"]).get("data", {})
         if status_data and status_data.get('code') == -100:
             msg += f"\n⚠️ {status_data.get('boarding')}，需要激活码！"
+        url = ""
+        if status_data and status_data.get('code') == 0:
+            d = status_data["data"]
+            site = d.get("site")
+            
+            if site == "glados.network":
+                # 结构：/userId/code/port/glados.yaml
+                url = f"https://update.glados-config.com/mihomo/{d['userId']}/{d['code']}/{d['port']}/glados.yaml"
+                
+            elif site == "railgun.info":
+                # 结构：/固定ID/password/full.yaml
+                url = f"https://update.railgunx.com/mihomo/e2308c94/{d['password']}/full.yaml"
+            
+            else:
+                url = "未知站点结构"
+            
+            ##print(url)
 
         points_data = api_fetch(page, API_MAP["points"])
         traffic_data = api_fetch(page, API_MAP["traffic"]).get("data", {})
@@ -197,7 +214,8 @@ def process_account(browser, email, current_storage):
             f"{msg}\n"
             f"⏳ 剩余: {int(float(left_days))} 天\n"
             f"📊 流量: {used_gb:.2f}G / {limit_gb:.0f}G\n"
-            f"💰 积分: {int(float(total_pts))}"
+            f"💰 积分: {int(float(total_pts))}\n"
+            f"🔗 订阅: {url}"
         )
 
         chart_path = generate_trend_chart(points_data, email)
