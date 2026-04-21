@@ -10,7 +10,7 @@ from nacl import encoding, public
 from playwright.sync_api import sync_playwright
 
 # ================= 配置 =================
-host='glados.cloud'
+HOST='glados.cloud'
 ENV_NAME='GLADOS'
 LOGIN_URL = f"https://{HOST}/login"
 CONSOLE_URL = f"https://{HOST}/console/account"
