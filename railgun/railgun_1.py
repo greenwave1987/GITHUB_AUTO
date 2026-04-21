@@ -172,7 +172,7 @@ def process_account(browser, email, current_storage):
             f"结果: {msg}\n"
             f"⏳ 剩余: {int(float(left_days))} 天\n"
             f"📊 流量: {used_gb:.2f}G / {limit_gb:.0f}G\n"
-            f"💰 积分: {total_pts}"
+            f"💰 积分: {int(float(total_pts))}"
         )
 
         # 4. 生成报表
