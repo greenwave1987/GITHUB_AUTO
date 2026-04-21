@@ -216,16 +216,28 @@ def run():
 
                 if check_session_by_points(page):
                     print(f"[{masked}] 签到")
-                    page.evaluate(
+                    checkin_res = page.evaluate(
                         f'''
-                        fetch("{CHECKIN_API}",{{
-                        method:"POST",
-                        headers:{{"content-type":"application/json"}},
-                        body:JSON.stringify({{token:"glados.cloud"}})
-                        }})
+                        async () => {{
+                            const r = await fetch("{CHECKIN_API}", {{
+                                method:"POST",
+                                headers:{{"content-type":"application/json"}},
+                                body:JSON.stringify({{token:"glados.cloud"}})
+                            }});
+                            return await r.json();
+                        }}
                         '''
                     )
-
+                    
+                    print(f"CHECKIN_API[{checkin_res}]")
+                    
+                    if checkin_res.get("code") == 0:
+                        print(f'[{masked}] ✅ 签到成功，获得{checkin_res.get("points")}积分！')
+                    elif checkin_res.get("code") == -100:
+                        print(f"[{masked}] ⚠️ 已签到")
+                    else:
+                        print(f"[{masked}] ❌ 签到失败 {checkin_res}")
+                    
                     status_json = page.evaluate(f'async () => {{ const r = await fetch("{STATUS_API}"); return await r.json(); }}')
                     left_days = int(float(status_json['data'].get('leftDays', 0)))
 
