@@ -159,7 +159,6 @@ def process_account(browser, email, current_storage):
             click_time = time.time()
             page.click("button:has-text('Get Code')")
             
-            # 直接调用全局函数
             code = tg_wait_code(email, click_time)
             if not code: 
                 print(f"[{masked}] 未能获取验证码，跳过")
@@ -167,7 +166,13 @@ def process_account(browser, email, current_storage):
             
             page.fill("#mailcode", code)
             page.click("button[type=submit]")
-            page.wait_for_url("**/console/account", timeout=30000)
+            
+            # --- 修复点：放宽匹配路径，并增加网络空闲等待 ---
+            try:
+                page.wait_for_url("**/console**", timeout=30000, wait_until="networkidle")
+                print(f"[{masked}] 登录跳转成功")
+            except Exception as e:
+                print(f"[{masked}] 登录跳转超时，尝试强制继续...")
 
         # 执行签到
         checkin_res = api_fetch(page, API_MAP["checkin"], "POST", {"token": HOST})
