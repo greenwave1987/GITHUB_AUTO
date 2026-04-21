@@ -248,17 +248,23 @@ def run():
                     if status_json and status_json.get("code") == 0:
                         left_days = int(float(status_json['data'].get('leftDays', 0)))
                     else:
+                        print(f"STATUS_API[{status_json}] ")
                         status_json = page.evaluate(f'async () => {{ const r = await fetch("{ASSERT_API}"); return await r.json(); }}')
-                        print(f"ASSERT_API[{status_json}] ")
+                        
                         if status_json and status_json.get("code") == 0:
                             left_days = int(float(status_json['data'].get('days', 0)))
+                        else:
+                            print(f"ASSERT_API:[{status_json}] ")
 
                     points_json = page.evaluate(f'async () => {{ const r = await fetch("{POINTS_API}"); return await r.json(); }}')
-                    print(f"POINTS_API[{points_json}] ")
+                    
                     total_points=0
                     if points_json and points_json.get("code") == 0:
                         total_points = int(float(points_json.get('points', 0)))
                         chart_path = generate_trend_chart(points_json, email)
+                    else:
+                        print(f"POINTS_API[{points_json}] ")
+                        
 
                     traffic_json = page.evaluate(f'async () => {{ const r = await fetch("{TRAFFIC_API}"); return await r.json(); }}')
                     traffic_info = "未知"
@@ -267,6 +273,8 @@ def run():
                         used_gb = t_data.get("today", 0) / (1024**3)
                         limit_gb = t_data.get("limit", 0) / 100 
                         traffic_info = f"{used_gb:.2f} GB / {limit_gb:.0f} GB"
+                    else:
+                        print(f"TRAFFIC_API[{traffic_json}] ")
 
                     
                     summary = (
