@@ -22,7 +22,20 @@ API_MAP = {
     "traffic": f"https://{HOST}/api/user/traffic",
     "assets": f"https://{HOST}/api/user/assets"
 }
-
+# 1. 定义等级字典
+level_dict = {
+    0: "Free",
+    6: "Expired",
+    7: "Reset",
+    8: "Overlimit",
+    9: "Spam",
+    10: "Free",
+    11: "Edu",
+    21: "Basic",
+    31: "Pro",
+    41: "Team",
+    51: "Enterprise"
+}
 EMAILS = [e.strip() for e in os.environ.get(f"{ENV_NAME}_EMAIL", "").split(",") if e.strip()]
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
@@ -30,7 +43,20 @@ REPO_TOKEN = os.environ.get("REPO_TOKEN")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY")
 
 # ================= 工具函数 =================
-
+def get_plan_type(info, mapping):
+    """
+    解析数据并返回套餐类别
+    """
+    try:
+        # 提取 vip 等级
+        vip_level = info['vip']
+        
+        # 从字典中获取对应名称，如果找不到则返回 Unknown
+        plan_name = mapping.get(vip_level, "Unknown")
+        
+        return plan_name
+    except KeyError:
+        return "Data Format Error"
 def mask_email(email):
     if not email or "@" not in email: return email
     prefix, domain = email.split('@')
@@ -187,6 +213,11 @@ def process_account(browser, email, current_storage):
         if status_data and status_data.get('code') == 0:
             d = status_data["data"]
             site = d.get("site")
+            
+            result = get_plan_type(d, level_dict)
+            
+            print(f"该用户的 VIP 等级为: {d['vip']}")
+            print(f"对应的套餐类别为: {result}")
             
             if site == "glados.network":
                 # 结构：/userId/code/port/glados.yaml
