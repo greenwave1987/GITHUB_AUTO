@@ -210,12 +210,13 @@ def process_account(browser, email, current_storage):
         if status_data and status_data.get('code') == -100:
             msg += f"\n⚠️ {status_data.get('boarding')}，需要激活码！"
         url = "null"
+        level="null"
         if status_data and status_data.get('code') == 0:
             d = status_data["data"]
             site = d.get("site")
             
             result = get_plan_type(d, level_dict)
-            
+            level=f"VIP 等级: {d['vip']}，套餐: {result}"
             print(f"该用户的 VIP 等级为: {d['vip']}")
             print(f"对应的套餐类别为: {result}")
             
@@ -242,6 +243,7 @@ def process_account(browser, email, current_storage):
 
         summary = (
             f"👤 账号: {masked}\n"
+            f"🏆 {level}\n"
             f"{msg}\n"
             f"⏳ 剩余: {int(float(left_days))} 天\n"
             f"📊 流量: {used_gb:.2f}G / {limit_gb:.0f}G\n"
