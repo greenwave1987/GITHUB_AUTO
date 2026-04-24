@@ -240,6 +240,8 @@ def process_account(browser, email, current_storage):
         total_pts = points_data.get("points", 0)
         used_gb = traffic_data.get("today", 0) / (1024**3)
         limit_gb = traffic_data.get("limit", 0) / 100
+        if result=='Basic':
+            limit_gb = 200
 
         summary = (
             f"👤 账号: {masked}\n"
