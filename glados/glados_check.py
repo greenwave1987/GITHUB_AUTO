@@ -129,7 +129,7 @@ def api_fetch(page, url, method="GET", body=None):
 def generate_trend_chart(points_data, email):
     history = points_data.get("history", [])
     if not history: return None
-    recent_history = list(reversed(history))[:15]
+    recent_history = list(reversed(history))##[:15]
     dates = [datetime.fromtimestamp(i['time']/1000).strftime('%m-%d') for i in recent_history]
     balances = [float(i.get('change', 0)) / 100 if float(i.get('change', 0)) < 0 else float(i.get('change', 0)) for i in recent_history]
     plt.figure(figsize=(10, 5))
