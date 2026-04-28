@@ -244,7 +244,7 @@ def process_account(browser, email, current_storage):
         limit_gb = traffic_data.get("limit", 0) / 100
         if result=='Basic':
             limit_gb = 200
-            if total_pts>500:
+            if int(float(total_pts)) > 500:
                 exchange_data = api_fetch(page, API_MAP["exchange"],"POST",JSON.stringify({{planType: "plan500"}}))
                 if exchange_data.get('code') == 0:
                     msg = f"🎁 GLaDOS 兑换成功！\n账号: {email}\n消耗: 500 积分\n新增: 100 天"
