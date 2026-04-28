@@ -20,8 +20,10 @@ API_MAP = {
     "points": f"https://{HOST}/api/user/points",
     "checkin": f"https://{HOST}/api/user/checkin",
     "traffic": f"https://{HOST}/api/user/traffic",
-    "assets": f"https://{HOST}/api/user/assets"
+    "assets": f"https://{HOST}/api/user/assets",
+    "exchange": f"https://{HOST}/api/user/exchange"
 }
+
 # 1. 定义等级字典
 level_dict = {
     0: "Free",
@@ -163,7 +165,7 @@ def update_github_secret(new_value):
         print(f"Update Secret Failed: {e}")
 
 # ================= 核心流程 =================
-
+                    
 def process_account(browser, email, current_storage):
     masked = mask_email(email)
     context = browser.new_context(
@@ -242,6 +244,17 @@ def process_account(browser, email, current_storage):
         limit_gb = traffic_data.get("limit", 0) / 100
         if result=='Basic':
             limit_gb = 200
+            if total_pts>500:
+                exchange_data = api_fetch(page, API_MAP["exchange"],"POST",JSON.stringify({{planType: "plan500"}}))
+                if exchange_data.get('code') == 0:
+                    msg = f"🎁 GLaDOS 兑换成功！\n账号: {email}\n消耗: 500 积分\n新增: 100 天"
+                    print(msg)
+                    tg_send(msg)
+                else:
+                    error_msg = exchange_data.get('message', '未知错误')
+                    print(f"[{email}] 兑换失败: {error_msg}")
+                    tg_send(f"⚠️ GLaDOS 兑换失败\n账号: {email}\n原因: {error_msg}")
+            
 
         summary = (
             f"👤 账号: {masked}\n"
