@@ -24,7 +24,6 @@ API_MAP = {
     "exchange": f"https://{HOST}/api/user/exchange"
 }
 
-# 1. 定义等级字典
 level_dict = {
     0: "Free",
     6: "Expired",
@@ -38,6 +37,7 @@ level_dict = {
     41: "Team",
     51: "Enterprise"
 }
+
 EMAILS = [e.strip() for e in os.environ.get(f"{ENV_NAME}_EMAIL", "").split(",") if e.strip()]
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
@@ -46,19 +46,12 @@ GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY")
 
 # ================= 工具函数 =================
 def get_plan_type(info, mapping):
-    """
-    解析数据并返回套餐类别
-    """
     try:
-        # 提取 vip 等级
-        vip_level = info['vip']
-        
-        # 从字典中获取对应名称，如果找不到则返回 Unknown
-        plan_name = mapping.get(vip_level, "Unknown")
-        
-        return plan_name
-    except KeyError:
+        vip_level = info.get('vip', 0)
+        return mapping.get(vip_level, "Unknown")
+    except Exception:
         return "Data Format Error"
+
 def mask_email(email):
     if not email or "@" not in email: return email
     prefix, domain = email.split('@')
@@ -82,7 +75,6 @@ def tg_send_photo(photo_path, caption):
         print(f"发送TG图片失败: {e}")
 
 def tg_wait_code(email, send_time, timeout=300):
-    """等待用户在TG回复验证码"""
     masked = mask_email(email)
     tg_send(f"📨 <b>{ENV_NAME} 验证码请求</b>\n账号: <code>{masked}</code>\n请在 {timeout//60} 分钟内回复：\n<code>/code 123456</code>")
 
@@ -97,7 +89,6 @@ def tg_wait_code(email, send_time, timeout=300):
                 msg = item.get("message", {})
                 text = msg.get("text", "")
                 if text.startswith("/code"):
-                    # 校验消息时间，防止读取旧验证码
                     if msg.get("date", 0) >= int(send_time):
                         code = text.replace("/code", "").strip()
                         print(f"收到验证码: {code}")
@@ -105,10 +96,11 @@ def tg_wait_code(email, send_time, timeout=300):
         except Exception as e:
             print(f"轮询TG验证码出错: {e}")
         time.sleep(5)
-    print(f"等待验证码超时 ({masked})")
     return None
 
 def api_fetch(page, url, method="GET", body=None):
+    # body 传入字典，在 Python 层处理 json.dumps
+    body_json = json.dumps(body) if body else "null"
     js_code = f"""
     async () => {{
         try {{
@@ -116,8 +108,8 @@ def api_fetch(page, url, method="GET", body=None):
                 method: "{method}",
                 headers: {{"Content-Type": "application/json"}}
             }};
-            if ("{method}" === "POST" && {json.dumps(body)}) {{
-                options.body = JSON.stringify({json.dumps(body)});
+            if ("{method}" === "POST" && {body_json} !== null) {{
+                options.body = JSON.stringify({body_json});
             }}
             const r = await fetch("{url}", options);
             return r.ok ? await r.json() : {{code: -1, msg: "HTTP Error " + r.status}};
@@ -131,9 +123,10 @@ def api_fetch(page, url, method="GET", body=None):
 def generate_trend_chart(points_data, email):
     history = points_data.get("history", [])
     if not history: return None
-    recent_history = list(reversed(history))##[:15]
+    recent_history = list(reversed(history))
     dates = [datetime.fromtimestamp(i['time']/1000).strftime('%m-%d') for i in recent_history]
     balances = [float(i.get('change', 0)) / 100 if float(i.get('change', 0)) < 0 else float(i.get('change', 0)) for i in recent_history]
+    
     plt.figure(figsize=(10, 5))
     plt.plot(dates, balances, marker='o', color='#2196F3', linewidth=2)
     plt.fill_between(dates, balances, color='#2196F3', alpha=0.1)
@@ -165,7 +158,7 @@ def update_github_secret(new_value):
         print(f"Update Secret Failed: {e}")
 
 # ================= 核心流程 =================
-                    
+
 def process_account(browser, email, current_storage):
     masked = mask_email(email)
     context = browser.new_context(
@@ -175,12 +168,18 @@ def process_account(browser, email, current_storage):
     page = context.new_page()
     page.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
 
+    # 初始化关键变量
+    result = "Unknown"
+    level = "Unknown"
+    left_days = 0
+    total_pts = 0
+
     try:
         page.goto(CONSOLE_URL, wait_until="networkidle")
-        status_data = api_fetch(page, API_MAP["status"])
+        status_resp = api_fetch(page, API_MAP["status"])
         
         # 登录失效判断
-        if not status_data or status_data.get('code') == -2:
+        if not status_resp or status_resp.get('code') == -2:
             print(f"[{masked}] Session失效，尝试登录...")
             page.goto(LOGIN_URL)
             page.fill("#email", email)
@@ -195,71 +194,71 @@ def process_account(browser, email, current_storage):
             page.fill("#mailcode", code)
             page.click("button[type=submit]")
             
-            # --- 修复点：放宽匹配路径，并增加网络空闲等待 ---
             try:
                 page.wait_for_url("**/console**", timeout=30000, wait_until="networkidle")
                 print(f"[{masked}] 登录跳转成功")
-            except Exception as e:
+            except Exception:
                 print(f"[{masked}] 登录跳转超时，尝试强制继续...")
 
         # 执行签到
         checkin_res = api_fetch(page, API_MAP["checkin"], "POST", {"token": HOST})
-        msg = "✅ 签到成功" if checkin_res.get("code") == 0 else "⚠️ 今日已签到"
+        checkin_msg = "✅ 签到成功" if checkin_res.get("code") == 0 else "⚠️ 今日已签到"
         
-        # 获取汇总数据
-        if status_data and status_data.get('code') == -2:
-            status_data = api_fetch(page, API_MAP["status"]).get("data", {})
-        if status_data and status_data.get('code') == -100:
-            msg += f"\n⚠️ {status_data.get('boarding')}，需要激活码！"
+        # 重新获取状态
+        status_resp = api_fetch(page, API_MAP["status"])
         url = "null"
-        level="null"
-        if status_data and status_data.get('code') == 0:
-            d = status_data["data"]
-            site = d.get("site")
-            
+        
+        if status_resp and status_resp.get('code') == 0:
+            d = status_resp["data"]
             result = get_plan_type(d, level_dict)
-            level=f"VIP 等级: {d['vip']}，套餐: {result}"
-            print(f"该用户的 VIP 等级为: {d['vip']}")
-            print(f"对应的套餐类别为: {result}")
+            level = f"VIP 等级: {d.get('vip')}，套餐: {result}"
+            left_days = d.get("leftDays", 0)
             
+            site = d.get("site")
             if site == "glados.network":
-                # 结构：/userId/code/port/glados.yaml
-                url = f"https://update.glados-config.com/mihomo/{d['userId']}/{d['code']}/{d['port']}/glados.yaml"
-                
+                url = f"https://update.glados-config.com/mihomo/{d.get('userId')}/{d.get('code')}/{d.get('port')}/glados.yaml"
             elif site == "railgun.info":
-                # 结构：/固定ID/password/full.yaml
-                url = f"https://update.railgunx.com/mihomo/e2308c94/{d['password']}/full.yaml"
-            
+                url = f"https://update.railgunx.com/mihomo/e2308c94/{d.get('password')}/full.yaml"
             else:
                 url = "未知站点结构"
-            
-            ##print(url)
 
         points_data = api_fetch(page, API_MAP["points"])
-        traffic_data = api_fetch(page, API_MAP["traffic"]).get("data", {})
-
-        left_days = status_data.get("leftDays") or api_fetch(page, API_MAP["assets"]).get("data", {}).get("days", 0)
         total_pts = points_data.get("points", 0)
+        
+        traffic_resp = api_fetch(page, API_MAP["traffic"])
+        traffic_data = traffic_resp.get("data", {})
         used_gb = traffic_data.get("today", 0) / (1024**3)
-        limit_gb = traffic_data.get("limit", 0) / 100
-        if result=='Basic':
+        limit_gb = traffic_data.get("limit", 0) / 100 # 保持原逻辑
+
+        # 自动兑换逻辑
+        if result == 'Basic':
+            plan_type = ""
             limit_gb = 200
-            if int(float(total_pts)) > 500:
-                exchange_data = api_fetch(page, API_MAP["exchange"],"POST",JSON.stringify({{planType: "plan500"}}))
+            pts_val = int(float(total_pts))
+            days_val = int(float(left_days))
+
+            if pts_val > 499:
+                plan_type = "plan500"
+            elif days_val < 2:
+                if pts_val > 199:
+                    plan_type = "plan200"
+                elif pts_val > 99:
+                    plan_type = "plan100"
+            
+            if plan_type:
+                # 修复 JSON.stringify 错误，直接传 body 字典
+                exchange_data = api_fetch(page, API_MAP["exchange"], "POST", {"plan": plan_type})
                 if exchange_data.get('code') == 0:
-                    msg = f"🎁 GLaDOS 兑换成功！\n账号: {email}\n消耗: 500 积分\n新增: 100 天"
-                    print(msg)
-                    tg_send(msg)
+                    ex_msg = f"🎁 GLaDOS 兑换成功！\n账号: {email}\n兑换：{plan_type}"
+                    tg_send(ex_msg)
                 else:
                     error_msg = exchange_data.get('message', '未知错误')
-                    print(f"[{email}] 兑换失败: {error_msg}")
                     tg_send(f"⚠️ GLaDOS 兑换失败\n账号: {email}\n原因: {error_msg}")
-            
 
         summary = (
             f"👤 账号: {masked}\n"
             f"🏆 {level}\n"
-            f"{msg}\n"
+            f"{checkin_msg}\n"
             f"⏳ 剩余: {int(float(left_days))} 天\n"
             f"📊 流量: {used_gb:.2f}G / {limit_gb:.0f}G\n"
             f"💰 积分: {int(float(total_pts))}\n"
@@ -269,7 +268,7 @@ def process_account(browser, email, current_storage):
         chart_path = generate_trend_chart(points_data, email)
         if chart_path:
             tg_send_photo(chart_path, summary)
-            os.remove(chart_path)
+            if os.path.exists(chart_path): os.remove(chart_path)
         else:
             tg_send(summary)
 
@@ -303,8 +302,10 @@ def run():
                 new_storage_dict[email] = res_state
         browser.close()
 
-    if new_storage_dict and json.dumps(new_storage_dict) != local_raw:
-        update_github_secret(json.dumps(new_storage_dict))
+    if new_storage_dict:
+        # 只有当 storage 真的改变时才更新
+        if json.dumps(new_storage_dict, sort_keys=True) != json.dumps(storage_dict, sort_keys=True):
+            update_github_secret(json.dumps(new_storage_dict))
 
 if __name__ == "__main__":
     run()
