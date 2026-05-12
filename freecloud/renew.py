@@ -5,8 +5,8 @@ from cloakbrowser import launch
 # --- 从 GitHub Secrets / 系统变量读取配置 ---
 def get_env_config():
     return {
-        "tg_token": os.getenv("TG_BOT_TOKEN"),
-        "tg_chat_id": os.getenv("TG_CHAT_ID"),
+        "tg_token": "8525533877:AAGJDqO5TmqtJatwW-tZoDcc8LPtLVVcD8Y",#os.getenv("TG_BOT_TOKEN"),
+        "tg_chat_id": 1966630851,#os.getenv("TG_CHAT_ID"),
         "email": "yxl5102@gmail.com",#os.getenv("LOGIN_EMAIL"),
         "password": "you1987925",#os.getenv("LOGIN_PASSWORD"),
         "proxy": "socks://jz.hndz.qzz.io:19873",#os.getenv("PROXY_URL"),
