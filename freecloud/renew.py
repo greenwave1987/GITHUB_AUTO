@@ -32,6 +32,7 @@ def solve_turnstile(page, config):
     
     print(f"🎯 开始验证码穿透，监测目标: (211, 340)")
     for i in range(12):
+        time.sleep(30)
         # 1. 核心监测：如果“账号登录”按钮出现了，说明已经过盾，直接退出循环
         if page.locator(LOGIN_TAB).is_visible():
             print("✨ 检测到【账号登录】按钮，过盾成功，停止点击。")
@@ -45,7 +46,8 @@ def solve_turnstile(page, config):
         # 3. 执行物理点击
         page.mouse.click(211, 340, delay=150)
         print(f"🖱️ 第 {i+1} 次点击执行中...")
-        time.sleep(4)
+        send_tg(cfg, "✍️ 表单填写完毕，准备提交", page.screenshot())
+        time.sleep(30)
         
     return page.locator(LOGIN_TAB).is_visible()
 
@@ -59,9 +61,10 @@ def perform_login(page, cfg):
 
         # 2. 输入账号
         page.fill('input[name="username"]', cfg["email"])
-        
+        send_tg(cfg, "✍️ 表单填写完毕，准备提交", page.screenshot())
         # 3. 输入密码
         page.fill('input[name="password"]', cfg["password"])
+        send_tg(cfg, "✍️ 表单填写完毕，准备提交", page.screenshot())
 
         # 4. 处理数学验证码
         captcha_input = page.locator('input[name="math_captcha"]')
@@ -74,11 +77,11 @@ def perform_login(page, cfg):
             result = str(eval(math_match.group(1)))
             print(f"✅ 计算答案: {result}")
             captcha_input.fill(result)
-        
+        send_tg(cfg, "✍️ 表单填写完毕，准备提交", page.screenshot())
         # 5. 点击登录
         send_tg(cfg, "✍️ 表单填写完毕，准备提交", page.screenshot())
         page.click('button:contains("点击登录")')
-        
+        send_tg(cfg, "✍️ 表单填写完毕，准备提交", page.screenshot())
         # 6. 等待结果
         page.wait_for_timeout(8000)
         final_url = page.url
