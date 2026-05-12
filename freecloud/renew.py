@@ -1,6 +1,8 @@
+#上一版本能点击成功过验证
 import os
 import requests
 import time
+import re
 from cloakbrowser import launch
 
 def get_env_config():
@@ -14,7 +16,6 @@ def get_env_config():
     }
 
 def send_tg(config, caption, image=None):
-    """通用 TG 推送函数"""
     url = f"https://api.telegram.org/bot{config['tg_token']}/"
     try:
         if image:
@@ -25,32 +26,71 @@ def send_tg(config, caption, image=None):
     except: pass
 
 def solve_turnstile(page, config):
-    """针对坐标 (211, 340) 的循环点击逻辑"""
-    # 监测验证是否成功的脚本
+    """穿透逻辑：监测到'账号登录'按钮即停止点击"""
     CHECK_JS = "!!(document.querySelector('input[name=\"cf-turnstile-response\"]')?.value.length > 20)"
+    LOGIN_TAB = 'a:has-text("账号登录")'
     
-    print(f"🎯 开始目标点击: (211, 340)")
-    for i in range(10):  # 最多尝试 10 次点击
-        if page.evaluate(CHECK_JS):
-            print("✅ 验证成功通过！")
+    print(f"🎯 开始验证码穿透，监测目标: (211, 340)")
+    for i in range(12):
+        # 1. 核心监测：如果“账号登录”按钮出现了，说明已经过盾，直接退出循环
+        if page.locator(LOGIN_TAB).is_visible():
+            print("✨ 检测到【账号登录】按钮，过盾成功，停止点击。")
             return True
-        time.sleep(30)  # 每次点击后等待 CF 反应
-        # 执行点击
+        
+        # 2. 辅助监测：检查隐藏响应值
+        if page.evaluate(CHECK_JS):
+            print("✅ 验证响应已生成 (JS Check Passed)")
+            return True
+        
+        # 3. 执行物理点击
         page.mouse.click(211, 340, delay=150)
-        print(f"🖱️ 第 {i+1} 次点击已执行...")
+        print(f"🖱️ 第 {i+1} 次点击执行中...")
+        time.sleep(4)
         
+    return page.locator(LOGIN_TAB).is_visible()
+
+def perform_login(page, cfg):
+    """表单登录逻辑"""
+    try:
+        print("📝 开始填写登录表单...")
+        # 1. 点击“账号登录”标签确保表单激活
+        page.click('a:has-text("账号登录")')
+        page.wait_for_timeout(1000)
+
+        # 2. 输入账号
+        page.fill('input[name="username"]', cfg["email"])
         
+        # 3. 输入密码
+        page.fill('input[name="password"]', cfg["password"])
+
+        # 4. 处理数学验证码
+        captcha_input = page.locator('input[name="math_captcha"]')
+        placeholder = captcha_input.get_attribute("placeholder")
+        print(f"🔢 验证码题目: {placeholder}")
         
-        # 每 3 次点击发一次截图确认状态
-        send_tg(config, f"📸 点击中状态确认 (第{i+1}次)", page.screenshot())
-        time.sleep(30)  # 每次点击后等待 CF 反应
-        send_tg(config, f"📸 点击中状态确认 (第{i+1}次)", page.screenshot())
-            
-    return page.evaluate(CHECK_JS)
+        # 解析提取数字和运算符，例如 "4 + 9 = ?" -> "4 + 9"
+        math_match = re.search(r'(\d+\s*[\+\-\*]\s*\d+)', placeholder)
+        if math_match:
+            result = str(eval(math_match.group(1)))
+            print(f"✅ 计算答案: {result}")
+            captcha_input.fill(result)
+        
+        # 5. 点击登录
+        send_tg(cfg, "✍️ 表单填写完毕，准备提交", page.screenshot())
+        page.click('button:contains("点击登录")')
+        
+        # 6. 等待结果
+        page.wait_for_timeout(8000)
+        final_url = page.url
+        print(f"🚀 登录后跳转 URL: {final_url}")
+        send_tg(cfg, f"🏁 任务结束\n当前标题: {page.title()}\nURL: {final_url}", page.screenshot())
+        
+    except Exception as e:
+        print(f"❌ 登录过程异常: {e}")
+        send_tg(cfg, f"❌ 登录异常: {str(e)[:100]}", page.screenshot())
 
 def run_task():
     cfg = get_env_config()
-    
     browser = launch(
         proxy=cfg["proxy"],
         headless=True,
@@ -64,7 +104,6 @@ def run_task():
     )
     
     page = browser.new_page()
-    # 强制设定视口，确保坐标一致
     page.set_viewport_size({"width": 1280, "height": 720})
 
     try:
@@ -72,28 +111,13 @@ def run_task():
         page.goto(cfg["url"], wait_until="domcontentloaded")
         time.sleep(5)
 
-        # 1. 穿透验证
+        # 穿透并登录
         if solve_turnstile(page, cfg):
-            print("🔓 穿透成功，准备登录...")
-            time.sleep(2)
-            
-            # 2. 登录逻辑
-            email_input = 'input[placeholder*="邮箱"]'
-            if page.query_selector(email_input):
-                page.type(email_input, cfg["email"], delay=100)
-                page.type('input[type="password"]', cfg["password"], delay=100)
-                page.keyboard.press("Enter")
-                
-                time.sleep(8)
-                send_tg(cfg, "🚀 登录完成，查看最终状态", page.screenshot())
-            else:
-                print("❌ 穿透可能成功但未发现表单")
+            perform_login(page, cfg)
         else:
-            print("❌ 循环点击后仍未通过验证")
-            send_tg(cfg, "⚠️ 最终未通过验证", page.screenshot())
+            print("❌ 未能通过验证码检测")
+            send_tg(cfg, "⚠️ 穿透失败", page.screenshot())
 
-    except Exception as e:
-        print(f"❌ 运行异常: {e}")
     finally:
         browser.close()
 
