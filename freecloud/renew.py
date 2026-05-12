@@ -27,59 +27,63 @@ def send_tg_photo(image_bytes, caption, config):
 
 def run_task():
     cfg = get_env_config()
+    
+    # 增加更多防止崩溃的参数
     browser = launch(
-        proxy=cfg["proxy"],
+        #proxy=cfg["proxy"],
         geoip=True,
         headless=True,
         humanize=True,
-        # 针对 Linux 环境的稳定性优化
-        args=["--no-sandbox", "--disable-setuid-sandbox"]
+        args=[
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage", # 使用 /tmp 而非 /dev/shm，防止大页面崩溃
+            "--disable-gpu",           # GitHub 环境不需要显卡加速
+            "--no-first-run",
+            "--no-zygote",
+            "--single-process"         # 降低内存占用
+        ]
     )
     
     page = browser.new_page()
+    # 设置全局默认超时为 30 秒，防止无限挂起
+    page.set_default_timeout(30000) 
+
     try:
-        # 1. 访问并增加超时时间
         print("正在打开页面...")
-        page.goto(cfg["url"], wait_until="networkidle", timeout=60000)
+        # 增加手动截图，确保即使失败也能看到最后一秒发生了什么
+        page.goto(cfg["url"], wait_until="domcontentloaded", timeout=45000)
         
-        # 2. 检查并处理 Cloudflare 盾 (等待最多 15 秒)
-        # 如果页面标题包含 "Just a moment" 或 "Cloudflare"，多等一会儿
-        if "Just a moment" in page.title() or "Cloudflare" in page.title():
-            print("检测到 Cloudflare 验证，等待中...")
-            page.wait_for_timeout(10000) 
-        
-        send_tg_photo(page.screenshot(), "📍 页面加载检查", cfg)
+        # 立即截图一次，确认是否进了 Cloudflare
+        send_tg_photo(page.screenshot(), "📸 页面初始加载状态", cfg)
 
-        # 3. 使用更稳健的等待方式定位元素
-        print("尝试定位输入框...")
-        # 等待邮箱输入框出现，最多等 20 秒
-        email_selector = 'input[type="text"], input[type="email"], input[placeholder*="邮箱"]'
-        page.wait_for_selector(email_selector, state="visible", timeout=20000)
+        print("开始定位输入框...")
+        # 缩短等待时间，如果 15 秒找不到就直接抛出异常截图
+        email_selector = 'input[placeholder*="邮箱"], input[type="email"]'
         
-        # 4. 执行输入
-        page.type(email_selector, cfg["email"], delay=120)
-        
-        # 定位并输入密码
-        pass_selector = 'input[type="password"]'
-        page.type(pass_selector, cfg["password"], delay=150)
-        
-        send_tg_photo(page.screenshot(), "✍️ 已填入信息", cfg)
+        try:
+            page.wait_for_selector(email_selector, state="visible", timeout=15000)
+        except Exception:
+            print("超时未找到输入框，尝试发送当前页面源码快照")
+            send_tg_photo(page.screenshot(), "❌ 找不到输入框，可能卡在验证码", cfg)
+            raise Exception("Selector Timeout")
 
-        # 5. 点击登录按钮
-        # 有些站点的登录按钮是 div 或者 span 模拟的，尝试多种定位
-        login_btn_selector = 'button[type="submit"], .login-button, button:has-text("登录")'
-        page.wait_for_selector(login_btn_selector, state="visible")
-        page.click(login_btn_selector)
+        # 执行输入
+        page.type(email_selector, cfg["email"], delay=100)
+        page.type('input[type="password"]', cfg["password"], delay=100)
         
-        # 6. 等待登录结果
-        page.wait_for_timeout(5000)
-        send_tg_photo(page.screenshot(), f"🚀 登录后状态\nURL: {page.url}", cfg)
+        # 点击登录
+        page.click('button[type="submit"]')
+        
+        # 关键：给跳转留出时间
+        page.wait_for_timeout(8000)
+        send_tg_photo(page.screenshot(), "✅ 登录后最终状态", cfg)
 
     except Exception as e:
-        print(f"执行失败: {str(e)}")
-        # 失败时必须截图，通过 TG 里的图你可以看到是卡在了验证码还是没找到框
+        print(f"执行过程中断: {e}")
+        # 最后的保底截图
         try:
-            send_tg_photo(page.screenshot(), f"❌ 运行异常: {str(e)}", cfg)
+            send_tg_photo(page.screenshot(), f"⚠️ 崩溃前截图: {str(e)}", cfg)
         except:
             pass
     finally:
