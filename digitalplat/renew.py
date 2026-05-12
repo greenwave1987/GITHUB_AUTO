@@ -2,83 +2,80 @@ import os
 import requests
 from datetime import datetime
 
-# 配置信息
-COOKIE = os.getenv("DOMAIN_COOKIE")
+# 从 GitHub Secrets 读取配置
+# 多个 Cookie 请在 Secret 中换行输入
+COOKIES_STR = os.getenv("DOMAIN_COOKIES") 
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
-DOMAIN_NAME = "hyz.qzz.io"
 BASE_URL = "https://dash.domain.digitalplat.org/_panel_api/api"
 
-def send_tg_notification(message):
-    if not TG_BOT_TOKEN or not TG_CHAT_ID:
-        print("未配置 TG 通知参数，跳过发送。")
-        return
-    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TG_CHAT_ID, "text": f"🌐 **域名续期脚本通知**\n\n{message}", "parse_mode": "Markdown"}
-    try:
-        requests.post(url, json=payload)
-    except Exception as e:
-        print(f"发送 TG 通知失败: {e}")
+def send_tg(message):
+    if TG_BOT_TOKEN and TG_CHAT_ID:
+        url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "Markdown"}
+        try: requests.post(url, json=payload)
+        except: print("TG 发送失败")
 
-def check_and_renew():
-    if not COOKIE:
-        msg = "❌ 错误: 未找到 DOMAIN_COOKIE 环境变量"
-        print(msg)
-        send_tg_notification(msg)
-        return
-
+def process_account(cookie, index):
     headers = {
         "accept": "*/*",
         "content-type": "application/json",
-        "user-agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5) AppleWebKit/537.36",
-        "cookie": COOKIE,
-        "Referer": f"https://dash.domain.digitalplat.org/domains/{DOMAIN_NAME}"
+        "user-agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5)",
+        "cookie": cookie.strip()
     }
-
+    
+    report = f"👤 **账号 # {index}**\n"
     try:
-        # 1. 查询状态
-        response = requests.get(f"{BASE_URL}/domains", headers=headers)
-        data = response.json()
+        # 1. 获取该账号下所有域名
+        res = requests.get(f"{BASE_URL}/domains", headers=headers)
+        data = res.json()
         
         if not data.get("ok"):
-            msg = f"❌ 查询失败，请检查 Cookie！\n响应内容: {data}"
-            print(msg)
-            send_tg_notification(msg)
-            return
+            return report + "❌ 登录失效或请求失败\n"
 
-        domain_info = next((d for d in data['domains'] if d['domain'] == DOMAIN_NAME), None)
-        if not domain_info:
-            msg = f"❌ 未在账户中找到域名: {DOMAIN_NAME}"
-            send_tg_notification(msg)
-            return
+        domains = data.get("domains", [])
+        if not domains:
+            return report + "❓ 该账号下无域名\n"
 
-        # 2. 计算日期
-        expiry_str = domain_info['expiry_date']
-        expiry_date = datetime.strptime(expiry_str, "%Y%m%d")
-        remaining_days = (expiry_date - datetime.now()).days
-        status_msg = f"域名: `{DOMAIN_NAME}`\n剩余天数: `{remaining_days}` 天\n到期日期: `{expiry_str}`"
-
-        # 3. 判断续期
-        if remaining_days < 100:
-            renew_res = requests.post(
-                f"{BASE_URL}/domains/{DOMAIN_NAME}/renew", 
-                headers=headers, 
-                json={"renewal_type": "free", "years": 1}
-            )
-            if renew_res.status_code == 200:
-                final_msg = f"✅ 续期请求成功！\n{status_msg}\n接口返回: {renew_res.text}"
+        for d in domains:
+            domain_name = d['domain']
+            expiry_str = d['expiry_date']
+            expiry_date = datetime.strptime(expiry_str, "%Y%m%d")
+            remaining_days = (expiry_date - datetime.now()).days
+            
+            item_info = f"- `{domain_name}`: 剩余 `{remaining_days}` 天 "
+            
+            # 2. 判断是否需要续期 (少于100天)
+            if remaining_days < 100:
+                renew_res = requests.post(
+                    f"{BASE_URL}/domains/{domain_name}/renew",
+                    headers=headers,
+                    json={"renewal_type": "free", "years": 1}
+                )
+                if renew_res.status_code == 200:
+                    item_info += "✅ **已续期**\n"
+                else:
+                    item_info += "⚠️ **续期失败**\n"
             else:
-                final_msg = f"⚠️ 续期请求异常！状态码: {renew_res.status_code}\n{status_msg}"
-        else:
-            final_msg = f"ℹ️ 运行正常，有效期充足。\n{status_msg}"
-        
-        print(final_msg)
-        send_tg_notification(final_msg)
+                item_info += "😴 状态良好\n"
+            
+            report += item_info
+        return report + "\n"
 
     except Exception as e:
-        error_msg = f"🔥 程序运行发生异常: {str(e)}"
-        print(error_msg)
-        send_tg_notification(error_msg)
+        return report + f"💥 运行异常: {str(e)}\n\n"
 
 if __name__ == "__main__":
-    check_and_renew()
+    if not COOKIES_STR:
+        print("未找到 DOMAIN_COOKIES")
+        exit(1)
+
+    # 支持换行或逗号分隔多个 Cookie
+    cookie_list = [c for c in COOKIES_STR.replace(',', '\n').split('\n') if c.strip()]
+    final_report = "🌐 **域名轮询检查报告**\n\n"
+    
+    for i, ck in enumerate(cookie_list, 1):
+        final_report += process_account(ck, i)
+    
+    print(final_report)
+    send_tg(final_report)
