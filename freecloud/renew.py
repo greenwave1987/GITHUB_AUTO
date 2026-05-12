@@ -31,18 +31,17 @@ def solve_turnstile(page, cfg):
     
     print(f"🎯 开始验证码穿透，监测目标: (211, 340)")
     for i in range(12):
-        time.sleep(30)
         # 1. 核心监测：如果“账号登录”按钮出现了，说明已经过盾，直接退出循环
         if page.locator(LOGIN_TAB).is_visible():
             print("✨ 检测到【账号登录】按钮，过盾成功，停止点击。")
             return True
         
         # 3. 执行物理点击
-        send_tg(cfg, "🎯 执行过盾", page.screenshot())
+        send_tg(cfg, f"🎯 第{i+1}.1次执行过盾", page.screenshot())
         page.mouse.click(211, 340, delay=150)
         print(f"🖱️ 第 {i+1} 次点击执行中...")
         time.sleep(3)
-        send_tg(cfg, "🎯 执行过盾", page.screenshot())
+        send_tg(cfg, f"🎯 第{i+1}.2次执行过盾", page.screenshot())
         time.sleep(30)
         
     return page.locator(LOGIN_TAB).is_visible()
