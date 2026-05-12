@@ -73,6 +73,7 @@ def run_task():
                 if host_div:
                     rect = host_div.bounding_box()
                     if rect:
+                        print(rect)
                         # 2. 根据容器位置计算点击点
                         # Turnstile 的复选框通常在 300x65 容器的左侧
                         # 点击位置：x 轴向右偏 30-40 像素，y 轴垂直居中
