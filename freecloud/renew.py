@@ -27,7 +27,6 @@ def send_tg(config, caption, image=None):
 
 def solve_turnstile(page, cfg):
     """穿透逻辑：监测到'账号登录'按钮即停止点击"""
-    CHECK_JS = "!!(document.querySelector('input[name=\"cf-turnstile-response\"]')?.value.length > 20)"
     LOGIN_TAB = 'a:has-text("账号登录")'
     
     print(f"🎯 开始验证码穿透，监测目标: (211, 340)")
@@ -36,11 +35,6 @@ def solve_turnstile(page, cfg):
         # 1. 核心监测：如果“账号登录”按钮出现了，说明已经过盾，直接退出循环
         if page.locator(LOGIN_TAB).is_visible():
             print("✨ 检测到【账号登录】按钮，过盾成功，停止点击。")
-            return True
-        
-        # 2. 辅助监测：检查隐藏响应值
-        if page.evaluate(CHECK_JS):
-            print("✅ 验证响应已生成 (JS Check Passed)")
             return True
         
         # 3. 执行物理点击
