@@ -9,7 +9,7 @@ def get_env_config():
         "tg_chat_id": os.getenv("TG_CHAT_ID"),
         "email": "yxl5102@gmail.com",#os.getenv("LOGIN_EMAIL"),
         "password": "you1987925",#os.getenv("LOGIN_PASSWORD"),
-        "proxy": "http://jz.hndz.qzz.io:19873",#os.getenv("PROXY_URL"),
+        "proxy": "socks://jz.hndz.qzz.io:19873",#os.getenv("PROXY_URL"),
         "url": "https://freecloud.ltd/login"
     }
 
@@ -28,7 +28,7 @@ def send_tg_photo(image_bytes, caption, config):
 def run_task():
     cfg = get_env_config()
     browser = launch(
-        #proxy=cfg["proxy"],
+        proxy=cfg["proxy"],
         geoip=True,
         headless=True,
         humanize=True,
