@@ -60,6 +60,11 @@ def solve_turnstile(page, cfg):
         (241, 340), # 2. 偏右
         (181, 340), # 3. 偏左
         (211, 360), # 4. 偏下
+        (211, 300),  # 5. 偏上
+        (211, 340), # 1. 理论中心 (根据红圈位置上移 50，右移 45)
+        (241, 340), # 2. 偏右
+        (181, 340), # 3. 偏左
+        (211, 360), # 4. 偏下
         (211, 300)  # 5. 偏上
 
     ]
@@ -76,7 +81,7 @@ def solve_turnstile(page, cfg):
         # 3. 点击
         page.mouse.click(px, py, delay=150)
         
-        time.sleep(3)
+        time.sleep(10)
     
     return page.evaluate(_SOLVED_JS)
 
