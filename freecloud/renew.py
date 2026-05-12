@@ -27,12 +27,23 @@ def send_tg_photo(image_bytes, caption, config):
 
 def run_task():
     cfg = get_env_config()
+    proxy_url = cfg["proxy"]
+    
     browser = launch(
-        proxy=cfg["proxy"],
-        geoip=True,
+        proxy=proxy_url,
+        geoip=False,  # 既然报错，先关掉它防止初始化挂起
         headless=True,
         humanize=True,
-        args=["--no-sandbox", "--disable-gpu"]
+        args=[
+            "--no-sandbox",
+            "--disable-gpu",
+            # 关键：强制浏览器底层所有流量走代理
+            f"--proxy-server={proxy_url}",
+            # 移除自动化指纹
+            "--disable-blink-features=AutomationControlled",
+            # 伪装一个真实的 User-Agent
+            "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ]
     )
     
     page = browser.new_page()
