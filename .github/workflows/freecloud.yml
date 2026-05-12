@@ -11,6 +11,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4 # 升级到 v4
+        
+      - name: Install Fonts
+        run: |
+          sudo apt update
+          sudo apt install -y fonts-wqy-zenhei # 安装文泉驿正黑体
 
       - name: Set up Python
         uses: actions/setup-python@v5 # 升级到 v5
