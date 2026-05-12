@@ -62,12 +62,35 @@ def run_task():
         # 截图 1：查看是否卡在验证码
         send_tg_photo(page.screenshot(), f"📸 初始加载状态\n标题: {page.title()}", cfg)
 
-        # 尝试处理常见的 Turnstile 验证码（如果有的话）
-        # 这里的原理是利用 CloakBrowser 的 humanize 模拟点击页面中心或特定区域
+       print("正在等待页面加载...")
+        page.goto(cfg["url"], wait_until="load", timeout=60000)
+        page.wait_for_timeout(5000) # 给 CF 盾加载的时间
+
+        # --- 穿透 Cloudflare 核心逻辑 ---
         if "Just a moment" in page.title():
-            print("检测到 Cloudflare 5秒盾，尝试模拟点击...")
-            page.mouse.click(200, 200) # 尝试点击可能的验证框位置
-            page.wait_for_timeout(10000)
+            print("检测到 Turnstile 验证框，开始尝试穿透...")
+            try:
+                # 1. 找到 CF 的验证 iframe
+                # Turnstile 的选择器通常包含 'iframe[src*="cloudflare"]'
+                page.wait_for_selector('iframe[src*="cloudflare"]', timeout=15000)
+                cf_frame = page.query_selector('iframe[src*="cloudflare"]')
+                
+                if cf_frame:
+                    rect = cf_frame.bounding_box()
+                    if rect:
+                        # 2. 计算中心点：向右偏 30 像素（通常复选框在左侧稍微偏中）
+                        click_x = rect['x'] + 30 
+                        click_y = rect['y'] + rect['height'] / 2
+                        
+                        # 使用 humanize 模拟移动并点击
+                        page.mouse.move(click_x, click_y, steps=10)
+                        page.mouse.click(click_x, click_y)
+                        print(f"🎯 已模拟点击坐标: ({click_x}, {click_y})")
+                        
+                        # 点击后必须等待，CF 会进行大约 2-5 秒的校验跳转
+                        page.wait_for_timeout(10000)
+            except Exception as e:
+                print(f"穿透尝试失败: {e}")
 
         print("🔍 尝试查找输入框...")
         # 扩展选择器范围，并改用 'attached' 状态尝试捕获非显示元素
