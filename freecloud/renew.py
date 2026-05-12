@@ -65,56 +65,83 @@ _COORDS_JS = """
     return null;
 })()
 """
+import os
+import requests
+import time
+from cloakbrowser import launch
 
-def solve_turnstile(page):
-    print("🔍 启动【矩阵覆盖】破解逻辑...")
-    
-    # 标准校验脚本
+# --- 核心调试工具：在页面上画出点击点 ---
+def draw_marker(page, x, y, color="red"):
+    """在点击位置注入一个永久的小圆点，方便截图查看"""
+    script = f"""
+    (lambda() {{
+        const marker = document.createElement('div');
+        marker.style.position = 'absolute';
+        marker.style.left = '{x}px';
+        marker.style.top = '{y}px';
+        marker.style.width = '12px';
+        marker.style.height = '12px';
+        marker.style.backgroundColor = '{color}';
+        marker.style.borderRadius = '50%';
+        marker.style.border = '2px solid white';
+        marker.style.zIndex = '10000000';
+        marker.style.pointerEvents = 'none';
+        marker.style.transform = 'translate(-50%, -50%)';
+        document.body.appendChild(marker);
+    }})();
+    """
+    try:
+        page.evaluate(script)
+    except:
+        pass
+
+def solve_turnstile_visual(page, cfg):
+    print("🔍 启动【可视化矩阵】穿透...")
     _SOLVED_JS = "!!(document.querySelector('input[name=\"cf-turnstile-response\"]')?.value.length > 20)"
+    
+    viewport = page.viewport_size
+    # 调整后的中心点比例（针对 1280x720 修正）
+    base_x = viewport['width'] * 0.13
+    base_y = viewport['height'] * 0.32  # 稍微调低了一点 Y 轴
 
-    for attempt in range(6):
-        # 1. 检查是否已过
+    # 定义矩阵偏移
+    offsets = [(0, 0), (30, 0), (-30, 0), (0, 30), (0, -30)]
+
+    for attempt in range(len(offsets)):
         if page.evaluate(_SOLVED_JS):
-            print("✅ 验证已通过")
+            print("✅ 验证已提前通过")
             return True
 
-        # 2. 尝试利用 Playwright 原生 frame_locator (不依赖 JS 定位)
-        try:
-            # Turnstile 经常使用固定 title
-            cf_frame = page.frame_locator('iframe[title*="Cloudflare"], iframe[src*="challenges"]')
-            # 尝试点击 frame 内部的 body (Playwright 会自动计算坐标)
-            cf_frame.locator('body').click(timeout=2000)
-            print("🎯 原生 Frame 点击指令已发出")
-        except:
-            pass
-
-        # 3. 矩阵点击逻辑：在 (13%, 28%) 附近 50 像素范围内点 9 个点
-        print(f"📡 执行区域矩阵点击 (Attempt {attempt+1})...")
-        viewport = page.viewport_size
-        center_x = viewport['width'] * 0.13
-        center_y = viewport['height'] * 0.28
+        curr_x = base_x + offsets[attempt][0]
+        curr_y = base_y + offsets[attempt][1]
         
-        # 偏移矩阵：中心、上下左右、四个角
-        offsets = [
-            (0, 0), (20, 0), (-20, 0), (0, 20), (0, -20),
-            (30, 30), (-30, -30), (30, -30), (-30, 30)
-        ]
+        # 1. 模拟真人移动
+        page.mouse.move(curr_x, curr_y, steps=10)
+        # 2. 画出标记（截图里能看到这些点）
+        draw_marker(page, curr_x, curr_y, "red" if attempt > 0 else "blue")
+        # 3. 执行点击
+        page.mouse.click(curr_x, curr_y, delay=100)
         
-        for ox, oy in offsets:
-            page.mouse.click(center_x + ox, center_y + oy, delay=50)
-            # 如果点中了，页面通常会开始刷新或标题改变
-            if page.evaluate(_SOLVED_JS):
-                print("✨ 矩阵点击命中！验证通过")
-                return True
+        print(f"📍 尝试点击并标记: ({curr_x}, {curr_y})")
+        page.wait_for_timeout(2000)
 
-        page.wait_for_timeout(4000)
+    # 关键：矩阵点完后，发一张带标记的截图到 TG
+    print("📡 发送可视化调试截图...")
+    send_tg_photo(page.screenshot(), f"📸 调试图：蓝色为中心，红色为矩阵点\n标题: {page.title()}", cfg)
     
+    page.wait_for_timeout(5000)
     return page.evaluate(_SOLVED_JS)
 
 def run_task():
-    cfg = get_env_config()
-    
-    print("🛠️ 正在启动浏览器 (UC Mode)...")
+    cfg = {
+        "tg_token": "8525533877:AAGJDqO5TmqtJatwW-tZoDcc8LPtLVVcD8Y",
+        "tg_chat_id": 1966630851,
+        "email": "yxl5102@gmail.com",
+        "password": "you1987925",
+        "proxy": "socks5://jz.hndz.qzz.io:19873",
+        "url": "https://freecloud.ltd/login"
+    }
+
     browser = launch(
         proxy=cfg["proxy"],
         geoip=False,
@@ -124,50 +151,37 @@ def run_task():
             "--no-sandbox",
             "--disable-gpu",
             "--window-size=1280,720",
-            f"--proxy-server={cfg['proxy']}",
-            "--disable-blink-features=AutomationControlled"
+            "--force-device-scale-factor=1",
+            f"--proxy-server={cfg['proxy']}"
         ]
     )
     
     page = browser.new_page()
-    page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-
     try:
-        print(f"🌐 正在访问: {cfg['url']}")
-        page.goto(cfg["url"], wait_until="domcontentloaded", timeout=60000)
-        
-        # 初始截图
+        page.goto(cfg["url"], wait_until="domcontentloaded")
         page.wait_for_timeout(5000)
-        send_tg_photo(page.screenshot(), "📸 初始加载状态", cfg)
 
-        # 核心：过盾
-        solve_turnstile(page)
+        # 执行可视化穿透
+        if not solve_turnstile_visual(page, cfg):
+            print("❌ 穿透失败，尝试刷新重来...")
+            page.reload()
+            page.wait_for_timeout(5000)
         
-        # 过盾后截图确认
-        page.wait_for_timeout(3000)
-        send_tg_photo(page.screenshot(), f"📸 过盾后页面: {page.title()}", cfg)
-
-        # 检查是否成功
-        email_selector = 'input[placeholder*="邮箱"], input[name="email"]'
-        try:
-            page.wait_for_selector(email_selector, state="visible", timeout=10000)
-            print("✍️ 正在输入账号密码...")
-            page.type(email_selector, cfg["email"], delay=120)
-            page.type('input[type="password"]', cfg["password"], delay=150)
-            
+        # 登录流程
+        email_selector = 'input[placeholder*="邮箱"]'
+        if page.query_selector(email_selector):
+            page.type(email_selector, cfg["email"], delay=100)
+            page.type('input[type="password"]', cfg["password"], delay=100)
             page.keyboard.press("Enter")
-            print("🖱️ 提交登录中...")
-            
-            page.wait_for_timeout(10000)
-            send_tg_photo(page.screenshot(), f"🚀 最终任务状态\nURL: {page.url}", cfg)
-        except:
-            print("❌ 未能在页面中找到登录表单")
+            page.wait_for_timeout(8000)
+            send_tg_photo(page.screenshot(), "🚀 最终任务结果", cfg)
+        else:
+            print("❌ 依旧未发现表单")
 
-    except Exception as e:
-        print(f"❌ 运行异常: {e}")
-        send_tg_photo(page.screenshot(), f"⚠️ 出错截图: {str(e)[:50]}", cfg)
     finally:
         browser.close()
+
+# (send_tg_photo 函数保持不变)
 
 if __name__ == "__main__":
     run_task()
