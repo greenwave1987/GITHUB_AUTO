@@ -61,38 +61,34 @@ def run_task():
         print(f"当前标题: {page.title()}")
 
         # --- 穿透 Cloudflare Turnstile ---
-        if "Just a moment" in page.title() or "challenges" in page.content():
-            print("🛡️ 检测到验证盾，开始尝试坐标穿透...")
+        if "Just a moment" in page.title():
+            print("🛡️ 检测到 Shadow DOM 封闭验证框，启动坐标计算...")
             try:
-                # 尝试多个可能的 iframe 选择器
-                selectors = ['iframe[src*="challenges"]', 'iframe[title*="Cloudflare"]']
-                cf_iframe = None
-                for s in selectors:
-                    if page.query_selector(s):
-                        cf_iframe = page.query_selector(s)
-                        break
+                # 1. 定位宿主元素 (含有 template 的那个 div)
+                # 你的源码显示它在 <template> 的父级 div 里
+                host_selector = 'div:has(input[name="cf-turnstile-response"])'
+                page.wait_for_selector(host_selector, timeout=15000)
                 
-                if cf_iframe:
-                    rect = cf_iframe.bounding_box()
+                host_div = page.query_selector(host_selector)
+                if host_div:
+                    rect = host_div.bounding_box()
                     if rect:
-                        # 验证码方框通常在 iframe 左侧 1/4 处
-                        # 计算坐标：x 轴向右偏移 30 像素，y 轴居中
-                        target_x = rect['x'] + 35
-                        target_y = rect['y'] + rect['height'] / 2
+                        # 2. 根据容器位置计算点击点
+                        # Turnstile 的复选框通常在 300x65 容器的左侧
+                        # 点击位置：x 轴向右偏 30-40 像素，y 轴垂直居中
+                        click_x = rect['x'] + 35
+                        click_y = rect['y'] + rect['height'] / 2
                         
-                        print(f"🎯 命中目标区域: ({target_x}, {target_y})，准备点击...")
-                        page.mouse.move(target_x, target_y, steps=15)
-                        page.mouse.click(target_x, target_y)
+                        print(f"🎯 物理坐标定位成功: ({click_x}, {click_y})")
                         
-                        # 点击后必须长等，给跳转留出时间
-                        print("⏳ 已点击，等待页面跳转...")
+                        # 3. 模拟真人移动轨迹并点击
+                        page.mouse.move(click_x, click_y, steps=20)
+                        page.mouse.click(click_x, click_y)
+                        
+                        print("✅ 坐标指令已发送，等待 CF 验证响应...")
                         page.wait_for_timeout(15000)
-                else:
-                    print("❓ 未找到验证 iframe，尝试屏幕正中心盲点...")
-                    page.mouse.click(400, 300)
-                    page.wait_for_timeout(10000)
-            except Exception as ce:
-                print(f"⚠️ 穿透尝试出错: {ce}")
+            except Exception as e:
+                print(f"❌ 坐标穿透失败: {e}")
 
         # 发送第一张截图看状态
         send_tg_photo(page.screenshot(), f"📸 页面状态: {page.title()}", cfg)
