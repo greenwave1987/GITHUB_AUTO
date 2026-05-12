@@ -1,9 +1,9 @@
 name: FreeCloud_Auto_Run
 
 on:
-  workflow_dispatch: # 支持手动运行
+  workflow_dispatch:
   schedule:
-    - cron: '30 23 * * *' # 每天北京时间早上 7:30 运行
+    - cron: '30 23 * * *'
 
 jobs:
   automation:
@@ -17,18 +17,26 @@ jobs:
         with:
           python-version: '3.9'
 
-      - name: Install Dependencies
+      - name: Install System Dependencies
+        # 这一步修复 Segmentation fault，安装运行 Chromium 所需的 Linux 核心库
         run: |
-          pip install requests
-          # 安装你的 cloakbrowser 库
-          pip install cloakbrowser 
+          sudo apt-get update
+          sudo apt-get install -y libgbm-dev libnss3 libatk-bridge2.0-0 libxkbcommon0 libasound2 libpangocairo-1.0-0 libx11-xcb1 libcomposite1 libxcursor1 libxdamage1 libxi6 libxtst6 libcups2 libxss1 libxrandr2
+
+      - name: Install Python Packages
+        # 修复 ImportError: 使用 [geoip] 模式安装
+        run: |
+          pip install requests pyyaml
+          pip install "cloakbrowser[geoip]"
+          # 如果 cloakbrowser 底层是 playwright，执行以下命令：
+          # playwright install chromium
 
       - name: Run Script
-        # 这里是关键：将 GitHub Secrets 转换为脚本能读取的环境变量
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
           LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
-        run: python freecloud/renew.py
+        # 使用 xvfb-run 运行脚本可以提供虚拟显示环境，进一步防止段错误
+        run: xvfb-run --auto-servernum python freecloud/renew.py
