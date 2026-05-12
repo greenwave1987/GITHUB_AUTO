@@ -68,27 +68,40 @@ def run_task():
 
         # --- 穿透 Cloudflare 核心逻辑 ---
         if "Just a moment" in page.title():
-            print("检测到 Turnstile 验证框，开始尝试穿透...")
+            print("检测到 Turnstile 验证，尝试穿透 iframe 内部...")
             try:
-                # 1. 找到 CF 的验证 iframe
-                # Turnstile 的选择器通常包含 'iframe[src*="cloudflare"]'
-                page.wait_for_selector('iframe[src*="cloudflare"]', timeout=15000)
-                # 1. 找到 iframe 容器
-                iframe_element = page.query_selector('iframe[src*="challenges"]')
+                # 1. 定位 Cloudflare 的 iframe (使用通配符匹配 src)
+                # Cloudflare Turnstile 的 URL 通常包含 challenges.cloudflare.com
+                cf_frame = page.frame_locator('iframe[src*="challenges.cloudflare.com"]')
                 
-                if iframe_element:
-                    rect = iframe_element.bounding_box()
-                    if rect:
-                        # 复选框通常在 iframe 的左侧（x轴偏右 30-50 像素），垂直居中
-                        click_x = rect['x'] + 30
-                        click_y = rect['y'] + rect['height'] / 2
-                        
-                        # 模拟真人移动并点击
-                        page.mouse.move(click_x, click_y, steps=10)
-                        page.mouse.click(click_x, click_y)
-                        print(f"🎯 坐标点击成功: ({click_x}, {click_y})")
+                # 2. 在 iframe 内部定位那个 checkbox
+                # 这里的 input[type="checkbox"] 是你提到的关键元素
+                checkbox = cf_frame.locator('input[type="checkbox"]')
+                
+                # 3. 确保元素存在并执行点击
+                # 使用 force=True 因为这类 checkbox 经常被原始 CSS 隐藏，实际显示的是美化后的 div/span
+                checkbox.wait_for(state="attached", timeout=10000)
+                
+                # 尝试点击。如果直接点 input 不行，就点它的父级或者 body
+                checkbox.click(force=True)
+                print("✅ 已点击 iframe 内部的勾选框")
+                
+                # 4. 点击后必须给 Cloudflare 时间处理跳转
+                page.wait_for_timeout(10000)
+                
             except Exception as e:
                 print(f"穿透尝试失败: {e}")
+                # 如果找不到具体 input，尝试点击 iframe 区域的中心点 (保底方案)
+                try:
+                    iframe_element = page.query_selector('iframe[src*="challenges"]')
+                    if iframe_element:
+                        rect = iframe_element.bounding_box()
+                        if rect:
+                            page.mouse.click(rect['x'] + 30, rect['y'] + rect['height'] / 2)
+                            print("🎯 执行了 iframe 区域盲点")
+                            page.wait_for_timeout(8000)
+                except:
+                    pass
 
         print("🔍 尝试查找输入框...")
         # 扩展选择器范围，并改用 'attached' 状态尝试捕获非显示元素
