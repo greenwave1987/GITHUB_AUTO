@@ -4,7 +4,7 @@ from datetime import datetime
 
 # 从 GitHub Secrets 读取配置
 # 多个 Cookie 请在 Secret 中换行输入
-COOKIES_STR = os.getenv("DOMAIN_COOKIES") 
+COOKIES_STR = os.getenv("DOMAIN_COOKIE") 
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 BASE_URL = "https://dash.domain.digitalplat.org/_panel_api/api"
