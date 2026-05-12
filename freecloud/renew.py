@@ -46,6 +46,28 @@ def adaptive_click(page, x_percent, y_percent):
     page.mouse.click(target_x, target_y, delay=200)
     
     return target_x, target_y
+def draw_click_point(page, x, y):
+    """在页面上画一个红点以标记点击位置"""
+    script = f"""
+    (lambda() {{
+        const div = document.createElement('div');
+        div.style.position = 'absolute';
+        div.style.left = '{x}px';
+        div.style.top = '{y}px';
+        div.style.width = '20px';
+        div.style.height = '20px';
+        div.style.backgroundColor = 'red';
+        div.style.borderRadius = '50%';
+        div.style.border = '2px solid white';
+        div.style.zIndex = '9999999';
+        div.style.pointerEvents = 'none';
+        div.style.transform = 'translate(-50%, -50%)';
+        document.body.appendChild(div);
+    }})();
+    """
+    page.evaluate(script)
+
+
 def run_task():
     cfg = get_env_config()
     proxy_url = cfg["proxy"]
@@ -84,11 +106,12 @@ def run_task():
             # 根据你截图测算的最佳比例：
             # X: 0.13 (13% 宽度处)
             # Y: 0.28 (28% 高度处)
-            tx, ty = adaptive_click(page, 0.13, 0.28)
+            # --- 在 run_task 中使用 ---
+            tx, ty = adaptive_click(page, 0.13, 0.28) # 你之前的比例函数
+            draw_click_point(page, tx, ty) # 标记红点
+            send_tg_photo(page.screenshot(), f"📍 红点标记点击位置: ({tx}, {ty})", cfg)
             
-            # 立即截图确认点击点（建议在点击位置画个圈，如果 CloakBrowser 支持）
-            page.wait_for_timeout(2000)
-            send_tg_photo(page.screenshot(), f"📸 比例点击确认\n坐标:({tx}, {ty})\n分辨率:{page.viewport_size}", cfg)
+
             
             print("⏳ 等待跳转...")
             page.wait_for_timeout(15000)
