@@ -34,7 +34,7 @@ def solve_turnstile(page, config):
         if page.evaluate(CHECK_JS):
             print("✅ 验证成功通过！")
             return True
-        time.sleep(60)  # 每次点击后等待 CF 反应
+        time.sleep(30)  # 每次点击后等待 CF 反应
         # 执行点击
         page.mouse.click(211, 340, delay=150)
         print(f"🖱️ 第 {i+1} 次点击已执行...")
@@ -42,6 +42,8 @@ def solve_turnstile(page, config):
         
         
         # 每 3 次点击发一次截图确认状态
+        send_tg(config, f"📸 点击中状态确认 (第{i+1}次)", page.screenshot())
+        time.sleep(30)  # 每次点击后等待 CF 反应
         send_tg(config, f"📸 点击中状态确认 (第{i+1}次)", page.screenshot())
             
     return page.evaluate(CHECK_JS)
