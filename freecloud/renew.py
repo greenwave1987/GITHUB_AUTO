@@ -62,29 +62,25 @@ def run_task():
 
         # --- 穿透 Cloudflare Turnstile ---
         if "Just a moment" in page.title():
-            print("🛡️ 正在执行多点模糊穿透...")
-            # 屏幕中心基准点
-            base_x = 1280 / 2  # 640
-            base_y = 285       # 估算高度
+            print("🛡️ 正在执行【高精度】坐标穿透...")
+            # 经过比例换算的精确点：
+            # X: 540 -> 修正为 505 (更靠左一点点，进入方框中心)
+            # Y: 285 -> 修正为 230 (向上移动，匹配图片中的实际位置)
+            target_x = 505 
+            target_y = 230
             
-            # 勾选框相对于中心的偏移量
-            # Turnstile 框宽300，左侧勾选框大约在中心往左 100 像素
-            target_x = base_x - 100
-            target_y = base_y
+            print(f"🎯 精确校准坐标: ({target_x}, {target_y})")
             
-            print(f"🎯 目标大致坐标: ({target_x}, {target_y})")
+            # 模拟真人：先滑过，再点击
+            page.mouse.move(target_x - 50, target_y, steps=10)
+            page.mouse.click(target_x, target_y, delay=150)
             
-            # 模拟真人：先移动到附近
-            page.mouse.move(target_x - 20, target_y - 10, steps=10)
+            # 关键：点击后立即截一张图发送，通过 TG 确认红点点在哪了
+            page.wait_for_timeout(1000)
+            send_tg_photo(page.screenshot(), "📸 点击位置瞬时确认", cfg)
             
-            # 执行三次微偏移点击，确保命中复选框中心
-            offsets = [(0, 0), (5, 5), (-5, -5)]
-            for ox, oy in offsets:
-                page.mouse.click(target_x + ox, target_y + oy, delay=100)
-                print(f"   已尝试点击子坐标: ({target_x + ox}, {target_y + oy})")
-            
-            # 点击后必须给 CF 校验时间
-            page.wait_for_timeout(12000)
+            # 给 CF 充分的加载时间
+            page.wait_for_timeout(15000)
 
 
         # 发送第一张截图看状态
