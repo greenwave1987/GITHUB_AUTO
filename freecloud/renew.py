@@ -73,22 +73,20 @@ def run_task():
                 # 1. 找到 CF 的验证 iframe
                 # Turnstile 的选择器通常包含 'iframe[src*="cloudflare"]'
                 page.wait_for_selector('iframe[src*="cloudflare"]', timeout=15000)
-                cf_frame = page.query_selector('iframe[src*="cloudflare"]')
+                # 1. 找到 iframe 容器
+                iframe_element = page.query_selector('iframe[src*="challenges"]')
                 
-                if cf_frame:
-                    rect = cf_frame.bounding_box()
+                if iframe_element:
+                    rect = iframe_element.bounding_box()
                     if rect:
-                        # 2. 计算中心点：向右偏 30 像素（通常复选框在左侧稍微偏中）
-                        click_x = rect['x'] + 30 
+                        # 复选框通常在 iframe 的左侧（x轴偏右 30-50 像素），垂直居中
+                        click_x = rect['x'] + 30
                         click_y = rect['y'] + rect['height'] / 2
                         
-                        # 使用 humanize 模拟移动并点击
+                        # 模拟真人移动并点击
                         page.mouse.move(click_x, click_y, steps=10)
                         page.mouse.click(click_x, click_y)
-                        print(f"🎯 已模拟点击坐标: ({click_x}, {click_y})")
-                        
-                        # 点击后必须等待，CF 会进行大约 2-5 秒的校验跳转
-                        page.wait_for_timeout(10000)
+                        print(f"🎯 坐标点击成功: ({click_x}, {click_y})")
             except Exception as e:
                 print(f"穿透尝试失败: {e}")
 
