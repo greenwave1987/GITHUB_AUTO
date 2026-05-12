@@ -1,0 +1,29 @@
+name: Domain Auto Renew
+
+on:
+  schedule:
+    # 每 10 天的凌晨 2 点运行 (UTC 时间)
+    - cron: '0 2 */10 * *'
+  workflow_dispatch:
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run renewal script
+        env:
+          DOMAIN_COOKIE: ${{ secrets.DOMAIN_COOKIE }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_USER_ID: ${{ secrets.TG_USER_ID }}
+        run: python digitalplat/digitalplat.py
