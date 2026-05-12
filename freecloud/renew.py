@@ -67,30 +67,47 @@ _COORDS_JS = """
 """
 
 def solve_turnstile(page):
-    print("🔍 正在执行 Cloudflare 破解逻辑...")
-    for attempt in range(8):
-        # 1. 检查是否已经通过
-        if page.evaluate(_SOLVED_JS):
-            print("✅ 验证已绕过 (Solved)")
-            return True
-        
-        # 2. 尝试通过脚本获取物理坐标
-        coords = page.evaluate(_COORDS_JS)
-        
-        if coords:
-            print(f"🎯 发现验证码坐标: {coords}，执行模拟点击...")
-            page.mouse.move(coords['x'], coords['y'], steps=15)
-            page.mouse.click(coords['x'], coords['y'], delay=150)
-        else:
-            # 3. 如果脚本死活找不到，执行“比例保底点击”
-            print(f"❓ 脚本未定位到 iframe，执行比例点击 (Attempt {attempt+1})...")
-            viewport = page.viewport_size
-            # 基于 1280x720 测算的比例: X=13%, Y=28%
-            bx = viewport['width'] * 0.13
-            by = viewport['height'] * 0.28
-            page.mouse.click(bx, by, delay=150)
+    print("🔍 启动【矩阵覆盖】破解逻辑...")
+    
+    # 标准校验脚本
+    _SOLVED_JS = "!!(document.querySelector('input[name=\"cf-turnstile-response\"]')?.value.length > 20)"
 
-        page.wait_for_timeout(5000)
+    for attempt in range(6):
+        # 1. 检查是否已过
+        if page.evaluate(_SOLVED_JS):
+            print("✅ 验证已通过")
+            return True
+
+        # 2. 尝试利用 Playwright 原生 frame_locator (不依赖 JS 定位)
+        try:
+            # Turnstile 经常使用固定 title
+            cf_frame = page.frame_locator('iframe[title*="Cloudflare"], iframe[src*="challenges"]')
+            # 尝试点击 frame 内部的 body (Playwright 会自动计算坐标)
+            cf_frame.locator('body').click(timeout=2000)
+            print("🎯 原生 Frame 点击指令已发出")
+        except:
+            pass
+
+        # 3. 矩阵点击逻辑：在 (13%, 28%) 附近 50 像素范围内点 9 个点
+        print(f"📡 执行区域矩阵点击 (Attempt {attempt+1})...")
+        viewport = page.viewport_size
+        center_x = viewport['width'] * 0.13
+        center_y = viewport['height'] * 0.28
+        
+        # 偏移矩阵：中心、上下左右、四个角
+        offsets = [
+            (0, 0), (20, 0), (-20, 0), (0, 20), (0, -20),
+            (30, 30), (-30, -30), (30, -30), (-30, 30)
+        ]
+        
+        for ox, oy in offsets:
+            page.mouse.click(center_x + ox, center_y + oy, delay=50)
+            # 如果点中了，页面通常会开始刷新或标题改变
+            if page.evaluate(_SOLVED_JS):
+                print("✨ 矩阵点击命中！验证通过")
+                return True
+
+        page.wait_for_timeout(4000)
     
     return page.evaluate(_SOLVED_JS)
 
