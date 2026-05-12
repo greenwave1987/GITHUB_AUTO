@@ -9,7 +9,7 @@ def get_env_config():
         "tg_chat_id": os.getenv("TG_CHAT_ID"),
         "email": "yxl5102@gmail.com",#os.getenv("LOGIN_EMAIL"),
         "password": "you1987925",#os.getenv("LOGIN_PASSWORD"),
-        "proxy": "https://jz.hndz.qzz.io:19873",#os.getenv("PROXY_URL"),
+        "proxy": "http://jz.hndz.qzz.io:19873",#os.getenv("PROXY_URL"),
         "url": "https://freecloud.ltd/login"
     }
 
