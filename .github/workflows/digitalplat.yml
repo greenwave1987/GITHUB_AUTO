@@ -25,5 +25,5 @@ jobs:
         env:
           DOMAIN_COOKIE: ${{ secrets.DOMAIN_COOKIE }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_USER_ID: ${{ secrets.TG_USER_ID }}
-        run: python digitalplat/digitalplat.py
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python digitalplat/renew.py
