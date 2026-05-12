@@ -38,7 +38,7 @@ def draw_and_screenshot(page, x, y, attempt_num, cfg):
         pass
     
     # 每点一下，截一张图发一次，方便精准排查
-    time.sleep(1) # 给渲染一点时间
+    time.sleep(5) # 给渲染一点时间
     img = page.screenshot()
     url = f"https://api.telegram.org/bot{cfg['tg_token']}/sendPhoto"
     requests.post(url, files={'photo': (f'click_{attempt_num}.png', img)}, 
@@ -65,7 +65,13 @@ def solve_turnstile(page, cfg):
         (241, 340), # 2. 偏右
         (181, 340), # 3. 偏左
         (211, 360), # 4. 偏下
-        (211, 300)  # 5. 偏上
+        (211, 300),  # 5. 偏上
+        (211, 340), # 1. 理论中心 (根据红圈位置上移 50，右移 45)
+        (211, 340), # 1. 理论中心 (根据红圈位置上移 50，右移 45)
+        (211, 340), # 1. 理论中心 (根据红圈位置上移 50，右移 45)
+        (211, 340), # 1. 理论中心 (根据红圈位置上移 50，右移 45)
+        (211, 340), # 1. 理论中心 (根据红圈位置上移 50，右移 45)
+        (211, 340) # 1. 理论中心 (根据红圈位置上移 50，右移 45)
 
     ]
 
