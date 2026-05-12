@@ -44,8 +44,10 @@ def solve_turnstile(page, cfg):
             return True
         
         # 3. 执行物理点击
+        send_tg(cfg, "🎯 执行过盾", page.screenshot())
         page.mouse.click(211, 340, delay=150)
         print(f"🖱️ 第 {i+1} 次点击执行中...")
+        time.sleep(3)
         send_tg(cfg, "🎯 执行过盾", page.screenshot())
         time.sleep(30)
         
