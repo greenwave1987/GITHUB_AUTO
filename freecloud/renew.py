@@ -62,7 +62,7 @@ def run_task():
         # 截图 1：查看是否卡在验证码
         send_tg_photo(page.screenshot(), f"📸 初始加载状态\n标题: {page.title()}", cfg)
 
-       print("正在等待页面加载...")
+        print("正在等待页面加载...")
         page.goto(cfg["url"], wait_until="load", timeout=60000)
         page.wait_for_timeout(5000) # 给 CF 盾加载的时间
 
