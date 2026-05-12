@@ -62,34 +62,40 @@ def run_task():
 
         # --- 穿透 Cloudflare Turnstile ---
         if "Just a moment" in page.title():
-            print("🛡️ 检测到 Shadow DOM 封闭验证框，启动坐标计算...")
+            print("🛡️ 检测到验证盾，执行精准坐标校准...")
             try:
-                # 1. 定位宿主元素 (含有 template 的那个 div)
-                # 你的源码显示它在 <template> 的父级 div 里
-                host_selector = 'div:has(input[name="cf-turnstile-response"])'
-                page.wait_for_selector(host_selector, timeout=15000)
+                # 1. 优先尝试直接锁定 iframe (即使在 Shadow DOM 内部，这个选择器通常也有效)
+                iframe = page.query_selector('iframe[title*="Cloudflare"]') or \
+                         page.query_selector('iframe[src*="challenges"]')
                 
-                host_div = page.query_selector(host_selector)
-                if host_div:
-                    rect = host_div.bounding_box()
-                    if rect:
-                        print(rect)
-                        # 2. 根据容器位置计算点击点
-                        # Turnstile 的复选框通常在 300x65 容器的左侧
-                        # 点击位置：x 轴向右偏 30-40 像素，y 轴垂直居中
-                        click_x = rect['x'] + 35
-                        click_y = rect['y'] + rect['height'] / 2
-                        
-                        print(f"🎯 物理坐标定位成功: ({click_x}, {click_y})")
-                        
-                        # 3. 模拟真人移动轨迹并点击
-                        page.mouse.move(click_x, click_y, steps=20)
-                        page.mouse.click(click_x, click_y)
-                        
-                        print("✅ 坐标指令已发送，等待 CF 验证响应...")
-                        page.wait_for_timeout(15000)
-            except Exception as e:
-                print(f"❌ 坐标穿透失败: {e}")
+                if iframe:
+                    rect = iframe.bounding_box()
+                    print(f"📦 发现验证码盒模型: {rect}")
+                    
+                    # 2. 计算真正中心偏左的点击点
+                    # 目标是点击那个小方框，它在 300 宽度的 iframe 里大约位于 x=30 到 x=50 处
+                    click_x = rect['x'] + 40 
+                    click_y = rect['y'] + rect['height'] / 2
+                else:
+                    # 3. 如果找不到 iframe，可能是因为 closed shadow root
+                    # 我们点击屏幕正中心，这是 Cloudflare 默认放置验证码的位置
+                    print("❓ 无法定位元素，执行屏幕中心保底策略...")
+                    click_x = 1280 / 2
+                    click_y = 651 / 2 - 50 # 稍微偏上一点
+
+                print(f"🎯 修正后的点击坐标: ({click_x}, {click_y})")
+                page.mouse.move(click_x, click_y, steps=25)
+                page.mouse.click(click_x, click_y)
+                
+                # 点击后一定要看一眼截图
+                page.wait_for_timeout(2000)
+                send_tg_photo(page.screenshot(), "📸 点击瞬间记录", cfg)
+                
+                print("⏳ 等待跳转...")
+                page.wait_for_timeout(13000)
+                
+            except Exception as ce:
+                print(f"⚠️ 坐标计算异常: {ce}")
 
         # 发送第一张截图看状态
         send_tg_photo(page.screenshot(), f"📸 页面状态: {page.title()}", cfg)
