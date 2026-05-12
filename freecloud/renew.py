@@ -109,6 +109,7 @@ def run_task():
         page.goto(cfg["url"], wait_until="domcontentloaded")
         page.wait_for_timeout(5000)
 
+        time.sleep(30)
         # 执行穿透
         solve_turnstile(page, cfg)
         
