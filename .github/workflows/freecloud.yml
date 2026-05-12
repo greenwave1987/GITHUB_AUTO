@@ -48,7 +48,7 @@ jobs:
 
       - name: Run Script
         env:
-          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
           LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
