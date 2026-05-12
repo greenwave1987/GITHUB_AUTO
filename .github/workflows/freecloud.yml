@@ -10,26 +10,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # 升级到 v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # 升级到 v5
         with:
           python-version: '3.9'
 
       - name: Install System Dependencies
-        # 这一步修复 Segmentation fault，安装运行 Chromium 所需的 Linux 核心库
+        # 移除了不存在的包，并更新了包名，增加 xvfb 用于虚拟显示
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgbm-dev libnss3 libatk-bridge2.0-0 libxkbcommon0 libasound2 libpangocairo-1.0-0 libx11-xcb1 libcomposite1 libxcursor1 libxdamage1 libxi6 libxtst6 libcups2 libxss1 libxrandr2
+          sudo apt-get install -y \
+            libgbm-dev \
+            libnss3 \
+            libatk-bridge2.0-0 \
+            libxkbcommon0 \
+            libasound2t64 \
+            libpangocairo-1.0-0 \
+            libx11-xcb1 \
+            libxcursor1 \
+            libxdamage1 \
+            libxi6 \
+            libxtst6 \
+            libcups2 \
+            libxss1 \
+            libxrandr2 \
+            xvfb
 
       - name: Install Python Packages
-        # 修复 ImportError: 使用 [geoip] 模式安装
         run: |
           pip install requests pyyaml
           pip install "cloakbrowser[geoip]"
-          # 如果 cloakbrowser 底层是 playwright，执行以下命令：
-          # playwright install chromium
+          # 关键一步：确保安装了浏览器二进制文件
+          # 如果 CloakBrowser 底层使用 Playwright
+          python -m playwright install --with-deps chromium
 
       - name: Run Script
         env:
@@ -38,5 +53,5 @@ jobs:
           LOGIN_EMAIL: ${{ secrets.LOGIN_EMAIL }}
           LOGIN_PASSWORD: ${{ secrets.LOGIN_PASSWORD }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
-        # 使用 xvfb-run 运行脚本可以提供虚拟显示环境，进一步防止段错误
+        # 使用 xvfb-run 包裹运行，解决显卡/显示器相关的 Core Dump
         run: xvfb-run --auto-servernum python freecloud/renew.py
