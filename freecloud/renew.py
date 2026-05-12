@@ -25,7 +25,7 @@ def send_tg(config, caption, image=None):
             requests.post(url + "sendMessage", data={'chat_id': config['tg_chat_id'], 'text': caption}, timeout=10)
     except: pass
 
-def solve_turnstile(page, config):
+def solve_turnstile(page, cfg):
     """穿透逻辑：监测到'账号登录'按钮即停止点击"""
     CHECK_JS = "!!(document.querySelector('input[name=\"cf-turnstile-response\"]')?.value.length > 20)"
     LOGIN_TAB = 'a:has-text("账号登录")'
