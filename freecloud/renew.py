@@ -28,7 +28,24 @@ def send_tg_photo(image_bytes, caption, config):
         print(f"📡 TG 发送状态: {res.status_code}")
     except Exception as e:
         print(f"📡 TG 发送崩溃: {e}")
-
+def adaptive_click(page, x_percent, y_percent):
+    # 1. 获取当前视口的分辨率
+    viewport = page.viewport_size
+    width = viewport['width']
+    height = viewport['height']
+    
+    # 2. 根据比例计算绝对坐标
+    target_x = width * x_percent
+    target_y = height * y_percent
+    
+    print(f"📊 当前分辨率: {width}x{height}")
+    print(f"🎯 计算后的比例坐标 ({x_percent*100}%, {y_percent*100}%): ({target_x}, {target_y})")
+    
+    # 3. 执行模拟真人点击
+    page.mouse.move(target_x, target_y, steps=15)
+    page.mouse.click(target_x, target_y, delay=200)
+    
+    return target_x, target_y
 def run_task():
     cfg = get_env_config()
     proxy_url = cfg["proxy"]
@@ -62,24 +79,18 @@ def run_task():
 
         # --- 穿透 Cloudflare Turnstile ---
         if "Just a moment" in page.title():
-            print("🛡️ 正在执行【高精度】坐标穿透...")
-            # 经过比例换算的精确点：
-            # X: 540 -> 修正为 505 (更靠左一点点，进入方框中心)
-            # Y: 285 -> 修正为 230 (向上移动，匹配图片中的实际位置)
-            target_x = 505 
-            target_y = 230
+            print("🛡️ 正在执行【比例自适应】穿透...")
             
-            print(f"🎯 精确校准坐标: ({target_x}, {target_y})")
+            # 根据你截图测算的最佳比例：
+            # X: 0.13 (13% 宽度处)
+            # Y: 0.28 (28% 高度处)
+            tx, ty = adaptive_click(page, 0.13, 0.28)
             
-            # 模拟真人：先滑过，再点击
-            page.mouse.move(target_x - 50, target_y, steps=10)
-            page.mouse.click(target_x, target_y, delay=150)
+            # 立即截图确认点击点（建议在点击位置画个圈，如果 CloakBrowser 支持）
+            page.wait_for_timeout(2000)
+            send_tg_photo(page.screenshot(), f"📸 比例点击确认\n坐标:({tx}, {ty})\n分辨率:{page.viewport_size}", cfg)
             
-            # 关键：点击后立即截一张图发送，通过 TG 确认红点点在哪了
-            page.wait_for_timeout(1000)
-            send_tg_photo(page.screenshot(), "📸 点击位置瞬时确认", cfg)
-            
-            # 给 CF 充分的加载时间
+            print("⏳ 等待跳转...")
             page.wait_for_timeout(15000)
 
 
