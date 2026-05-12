@@ -1,61 +1,69 @@
+import os
 import requests
 from cloakbrowser import launch
-import io
 
-# --- 配置区 ---
-TG_TOKEN = os.getenv("TG_BOT_TOKEN")
-TG_CHAT_ID = os.getenv("TG_CHAT_ID")
+# --- 从 GitHub Secrets / 系统变量读取配置 ---
+def get_env_config():
+    return {
+        "tg_token": os.getenv("TG_BOT_TOKEN"),
+        "tg_chat_id": os.getenv("TG_CHAT_ID"),
+        "email": "yxl5102@gmail.com"#os.getenv("LOGIN_EMAIL"),
+        "password": "you1987925"#os.getenv("LOGIN_PASSWORD"),
+        "proxy": "https://jz.hndz.qzz.io:19873"#os.getenv("PROXY_URL"),
+        "url": "https://freecloud.ltd/login"
+    }
 
-def send_tg_photo(image_bytes, caption):
-    """通过 TG Bot 发送二进制流图片"""
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
-    files = {'photo': ('screenshot.png', image_bytes, 'image/png')}
-    data = {'chat_id': TG_CHAT_ID, 'caption': caption}
+def send_tg_photo(image_bytes, caption, config):
+    if not config["tg_token"]:
+        return
+    url = f"https://api.telegram.org/bot{config['tg_token']}/sendPhoto"
+    files = {'photo': ('ss.png', image_bytes, 'image/png')}
+    data = {'chat_id': config['tg_chat_id'], 'caption': caption}
     try:
-        response = requests.post(url, files=files, data=data)
-        return response.json()
+        # 如果需要 TG 代理（通常 GitHub Actions 访问 TG 不需要额外代理）
+        requests.post(url, files=files, data=data, timeout=15)
     except Exception as e:
-        print(f"发送 TG 失败: {e}")
-
-# --- 自动化逻辑 ---
-browser = launch(
-    proxy="http://jz.hndz.qzz.io:19873",
-    geoip=True,
-    headless=False,
-    humanize=True,
-)
+        print(f"TG 发送失败: {e}")
 
 def run_task():
-    page = browser.new_page()
+    cfg = get_env_config()
     
+    # 基础校验
+    if not cfg["email"] or not cfg["proxy"]:
+        print("错误: 缺少必要的环境变量 (EMAIL 或 PROXY)")
+        return
+
+    # 启动 CloakBrowser
+    browser = launch(
+        proxy=cfg["proxy"],
+        geoip=True,
+        headless=True,  # GitHub 必须为 True
+        humanize=True,
+    )
+    
+    page = browser.new_page()
     try:
-        # 步骤 1: 访问页面
-        page.goto("https://freecloud.ltd/login", wait_until="networkidle")
-        # 捕获截图并转为字节流发送
-        shot = page.screenshot() 
-        send_tg_photo(shot, "Step 1: 已到达登录页面")
+        # 1. 访问页面
+        page.goto(cfg["url"], wait_until="networkidle")
+        send_tg_photo(page.screenshot(), "📍 页面已加载", cfg)
 
-        # 步骤 2: 输入账号
-        page.type('input[placeholder*="邮箱"]', "your_email@example.com", delay=100)
-        page.type('input[placeholder*="密码"]', "your_password", delay=150)
-        shot = page.screenshot()
-        send_tg_photo(shot, "Step 2: 账号密码输入完毕")
-
-        # 步骤 3: 点击登录
+        # 2. 模拟真人输入
+        page.type('input[placeholder*="邮箱"]', cfg["email"], delay=120)
+        page.type('input[placeholder*="密码"]', cfg["password"], delay=150)
+        
+        # 3. 点击登录
         login_btn = page.query_selector('button[type="submit"]')
         if login_btn:
             login_btn.click()
-            # 登录跳转通常需要时间，等待 3-5 秒
-            page.wait_for_timeout(5000) 
+            page.wait_for_timeout(5000) # 等待登录后的跳转
             
-        # 步骤 4: 结果反馈
-        shot = page.screenshot()
-        send_tg_photo(shot, f"Step 3: 登录点击后状态 \n当前URL: {page.url}")
+        # 4. 最终截图反馈
+        send_tg_photo(page.screenshot(), f"🚀 登录尝试完成\n当前URL: {page.url}", cfg)
 
     except Exception as e:
-        # 错误时截图告警
-        error_shot = page.screenshot()
-        send_tg_photo(error_shot, f"❌ 运行出错: {str(e)}")
+        print(f"运行出错: {e}")
+        if 'page' in locals():
+            send_tg_photo(page.screenshot(), f"❌ 运行异常: {str(e)}", cfg)
     finally:
         browser.close()
 
