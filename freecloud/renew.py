@@ -35,7 +35,7 @@ def run_task():
 
     # 启动 CloakBrowser
     browser = launch(
-        proxy=cfg["proxy"],
+        #proxy=cfg["proxy"],
         geoip=True,
         headless=True,  # GitHub 必须为 True
         humanize=True,
