@@ -19,7 +19,7 @@ def send_tg_photo(image_bytes, caption):
 
 # --- 自动化逻辑 ---
 browser = launch(
-    proxy="http://your-residential-proxy:port",
+    proxy="http://jz.hndz.qzz.io:19873",
     geoip=True,
     headless=False,
     humanize=True,
