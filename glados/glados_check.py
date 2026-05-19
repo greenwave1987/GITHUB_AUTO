@@ -247,7 +247,7 @@ def process_account(browser, email, current_storage):
             
             if plan_type:
                 # 修复 JSON.stringify 错误，直接传 body 字典
-                exchange_data = api_fetch(page, API_MAP["exchange"], "POST", {"plan": plan_type})
+                exchange_data = api_fetch(page, API_MAP["exchange"], "POST", {"planType": plan_type})
                 if exchange_data.get('code') == 0:
                     ex_msg = f"🎁 GLaDOS 兑换成功！\n账号: {email}\n兑换：{plan_type}"
                     tg_send(ex_msg)
