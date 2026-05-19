@@ -239,7 +239,7 @@ def process_account(browser, email, current_storage):
 
             if pts_val > 499:
                 plan_type = "plan500"
-            elif days_val < 2:
+            elif days_val < 3:
                 if pts_val > 199:
                     plan_type = "plan200"
                 elif pts_val > 99:
