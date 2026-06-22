@@ -19,10 +19,11 @@ jobs:
           python-version: '3.11' # 升级到 3.11，对预编译的 wheel 兼容更好，安装速度更快
 
       - name: Install dependencies
-        # 将原先的 requests 改为安装 curl-cffi
         run: |
           pip install --upgrade pip
-          pip install curl-cffi
+          pip install playwright
+          # 安装 Playwright 所需的浏览器内核 (只装 chromium 即可，节省时间)
+          playwright install chromium --with-deps
 
       - name: Run renewal script
         env:
