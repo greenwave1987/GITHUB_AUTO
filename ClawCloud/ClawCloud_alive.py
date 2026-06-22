@@ -19,7 +19,7 @@ from requests.exceptions import RequestException
 # ==================== 配置 ====================
 # 固定登录入口，OAuth后会自动跳转到实际区域
 LOGIN_ENTRY_URL = "https://dash.domain.digitalplat.org"
-SIGNIN_URL = f"{LOGIN_ENTRY_URL}/auth/login"
+SIGNIN_URL = f"{LOGIN_ENTRY_URL}"
 DEVICE_VERIFY_WAIT = 30  # Mobile验证 默认等 30 秒
 TWO_FACTOR_WAIT = int(os.environ.get("TWO_FACTOR_WAIT", "120"))  # 2FA验证 默认等 120 秒
 STATUS_OK = "OK"
