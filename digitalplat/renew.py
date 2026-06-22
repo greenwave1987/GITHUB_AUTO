@@ -124,14 +124,13 @@ async def main():
     final_report = "🌐 **域名轮询检查报告 (Playwright 驱动)**\n\n"
     
     async with async_playwright() as p:
-        # 启动 chromium 浏览器
+        # 1. 启动浏览器
         browser = await p.chromium.launch(headless=True)
-        # 创建一个占位 context 传递句柄
-        context = await browser.new_context()
-        context.browser = browser
         
+        # 2. 直接将 browser 实例传进循环（稍后在函数内部直接通过 browser.new_context() 创建隔离上下文）
         for i, ck in enumerate(cookie_list, 1):
-            final_report += await process_account(context, ck, i)
+            # 注意：这里我们直接把 browser 传过去，而不是传 context
+            final_report += await process_account(browser, ck, i)
             
         await browser.close()
     
