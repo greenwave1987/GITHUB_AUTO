@@ -775,7 +775,7 @@ class AutoLogin:
         self.log(f"用户名: {self.username}")
         self.log(f"Session: {'有' if self.gh_session else '无'}")
         self.log(f"密码: {'有' if self.password else '无'}")
-        self.log(f"登录入口: {LOGIN_ENTRY_URL}")
+        self.log(f"登录入口: {SIGNIN_URL}")
         
         if not self.username or not self.password:
             self.log("缺少凭据", "ERROR")
