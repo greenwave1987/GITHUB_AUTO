@@ -1,9 +1,9 @@
 import os
+import asyncio
 from datetime import datetime
-# 将 requests 替换为 curl_cffi 的 requests
-from curl_cffi import requests
+# 引入 playwright
+from playwright.async_api import async_playwright
 
-# 从 GitHub Secrets 读取配置
 COOKIES_STR = os.getenv("DOMAIN_COOKIE") 
 TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
@@ -11,107 +11,132 @@ BASE_URL = "https://dash.domain.digitalplat.org/_panel_api/api"
 
 def send_tg(message):
     if TG_BOT_TOKEN and TG_CHAT_ID:
-        # 飞往 TG 的接口一般不会被 cf 拦截，保持常规请求即可
         url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
         payload = {"chat_id": TG_CHAT_ID, "text": message, "parse_mode": "Markdown"}
         try:
-            # 简单使用原生的方式发通知
-            import json
-            import urllib.request
+            import json, urllib.request
             req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'})
             urllib.request.urlopen(req, timeout=10)
-        except Exception as e: 
-            print(f"TG 发送失败: {e}")
+        except Exception as e: print(f"TG 发送失败: {e}")
 
-def process_account(cookie, index):
-    # 模拟高度逼真的浏览器头部
-    headers = {
-        "accept": "*/*",
-        "accept-language": "zh-CN,zh;q=0.9",
-        "cache-control": "no-cache",
-        "content-type": "application/json",
-        "pragma": "no-cache",
-        "sec-gpc": "1",
-        "cookie": cookie.strip()
-    }
-    
+# 解析 Cookie 字符串为 Playwright 格式
+def parse_cookie_to_playwright(cookie_str, domain_host="dash.domain.digitalplat.org"):
+    playwright_cookies = []
+    pairs = cookie_str.strip().split(';')
+    for pair in pairs:
+        if '=' in pair:
+            name, value = pair.split('=', 1)
+            playwright_cookies.append({
+                "name": name.strip(),
+                "value": value.strip(),
+                "domain": domain_host,
+                "path": "/"
+            })
+    return playwright_cookies
+
+async def process_account(context, cookie_str, index):
     report = f"👤 **账号 # {index}**\n"
+    
+    # 为当前账号创建一个独立的隔离页面（携带该账号的 Cookie）
+    account_context = await context.browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+    cookies = parse_cookie_to_playwright(cookie_str)
+    await account_context.add_cookies(cookies)
+    
+    page = await account_context.new_page()
+    
     try:
-        # --- 1. 获取该账号下所有域名 ---
-        # 加上 impersonate 模拟 Chrome 指纹，补充 Referer 防护
-        domains_url = f"{BASE_URL}/domains"
-        account_headers = headers.copy()
-        account_headers["Referer"] = "https://dash.domain.digitalplat.org/domains"
+        # 先让浏览器正常访问一次主页，让 WAF 放行并建立会话
+        await page.goto("https://dash.domain.digitalplat.org/domains", timeout=30000, wait_until="networkidle")
         
-        res = requests.get(
-            domains_url, 
-            headers=account_headers, 
-            impersonate="chrome124", 
-            timeout=15
-        )
+        # 使用浏览器内部环境执行 fetch，天然携带完美的浏览器环境和过墙凭证
+        fetch_domains_script = f"""
+        async () => {{
+            const res = await fetch("{BASE_URL}/domains", {{
+                headers: {{ "accept": "application/json" }}
+            }});
+            return {{ status: res.status, text: await res.text() }};
+        }}
+        """
         
-        # 如果获取列表时就 403，直接抛出，免得解析报错
-        if res.status_code == 403:
-            return report + "❌ 请求被 WAF 拦截 (403 防爬虫触发)，请更新 Cookie 或检查 WAF 状态。\n"
+        result = await page.evaluate(fetch_domains_script)
+        
+        if result["status"] == 403:
+            await account_context.close()
+            return report + "❌ 浏览器请求仍被 WAF 拦截 (403)，可能 IP 被彻底拉黑或 Cookie 绑定了原 IP。\n"
             
-        data = res.json()
+        import json
+        data = json.loads(result["text"])
         if not data.get("ok"):
+            await account_context.close()
             return report + "❌ 登录失效或获取域名失败\n"
 
         domains = data.get("domains", [])
         if not domains:
+            await account_context.close()
             return report + "❓ 该账号下无域名\n"
 
         for d in domains:
             domain_name = d['domain']
-            expiry_str = d['expiry_date'] # 格式如 "20261120"
+            expiry_str = d['expiry_date']
             expiry_date = datetime.strptime(expiry_str, "%Y%m%d")
             remaining_days = (expiry_date - datetime.now()).days
             
             item_info = f"- `{domain_name}`: 剩余 `{remaining_days}` 天 "
             
-            # --- 2. 判断是否需要续期 (少于100天) ---
             if remaining_days < 100:
-                renew_url = f"{BASE_URL}/domains/{domain_name}/renew"
+                # 同样在浏览器内部上下文中跑续期 Fetch
+                renew_script = f"""
+                async () => {{
+                    const res = await fetch("{BASE_URL}/domains/{domain_name}/renew", {{
+                        method: "POST",
+                        headers: {{ "content-type": "application/json" }},
+                        body: JSON.stringify({{ "renewal_type": "free", "years": 1 }})
+                    }});
+                    return {{ status: res.status, text: await res.text() }};
+                }}
+                """
+                renew_result = await page.evaluate(renew_script)
                 
-                # 动态构造当前域名的 Referer，防止防刷系统校验
-                renew_headers = headers.copy()
-                renew_headers["Referer"] = f"https://dash.domain.digitalplat.org/domains/{domain_name}"
-                
-                renew_res = requests.post(
-                    renew_url,
-                    headers=renew_headers,
-                    json={"renewal_type": "free", "years": 1},
-                    impersonate="chrome124",  # 关键：全量模拟浏览器 JA3 指纹
-                    timeout=15
-                )
-                
-                if renew_res.status_code == 200 and renew_res.json().get("ok"):
+                if renew_result["status"] == 200 and json.loads(renew_result["text"]).get("ok"):
                     item_info += "✅ **已续期**\n"
-                elif renew_res.status_code == 403:
-                    item_info += "⚠️ **续期被 WAF 拦截 (403)**\n"
                 else:
-                    item_info += "⚠️ **续期失败**\n"
+                    item_info += f"⚠️ **续期失败 (Status: {renew_result['status']})**\n"
             else:
                 item_info += "😴 状态良好\n"
             
             report += item_info
-        return report + "\n"
 
     except Exception as e:
-        return report + f"💥 运行异常: {str(e)}\n\n"
+        report += f"💥 运行异常: {str(e)}\n\n"
+    finally:
+        await account_context.close()
+        
+    return report + "\n"
 
-if __name__ == "__main__":
+async def main():
     if not COOKIES_STR:
         print("未找到 DOMAIN_COOKIES")
         exit(1)
 
-    # 支持换行或逗号分隔多个 Cookie
     cookie_list = [c for c in COOKIES_STR.replace(',', '\n').split('\n') if c.strip()]
-    final_report = "🌐 **域名轮询检查报告**\n\n"
+    final_report = "🌐 **域名轮询检查报告 (Playwright 驱动)**\n\n"
     
-    for i, ck in enumerate(cookie_list, 1):
-        final_report += process_account(ck, i)
+    async with async_playwright() as p:
+        # 启动 chromium 浏览器
+        browser = await p.chromium.launch(headless=True)
+        # 创建一个占位 context 传递句柄
+        context = await browser.new_context()
+        context.browser = browser
+        
+        for i, ck in enumerate(cookie_list, 1):
+            final_report += await process_account(context, ck, i)
+            
+        await browser.close()
     
     print(final_report)
     send_tg(final_report)
+
+if __name__ == "__main__":
+    asyncio.run(main())
