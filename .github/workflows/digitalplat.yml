@@ -16,10 +16,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.11' # 升级到 3.11，对预编译的 wheel 兼容更好，安装速度更快
 
       - name: Install dependencies
-        run: pip install requests
+        # 将原先的 requests 改为安装 curl-cffi
+        run: |
+          pip install --upgrade pip
+          pip install curl-cffi
 
       - name: Run renewal script
         env:
