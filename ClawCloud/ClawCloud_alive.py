@@ -835,7 +835,7 @@ class AutoLogin:
                 # 1. 访问 ClawCloud 登录入口
                 self.log("步骤1: 打开 ClawCloud 登录页", "STEP")
                 page.goto(SIGNIN_URL, timeout=120000)
-                page.wait_for_load_state('networkidle', timeout=30000)
+                page.wait_for_load_state('load', timeout=30000)
                 time.sleep(2)
                 self.shot(page, "clawcloud")
                 
