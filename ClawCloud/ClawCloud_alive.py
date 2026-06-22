@@ -611,8 +611,56 @@ class AutoLogin:
         
         self.log("重定向超时", "ERROR")
         return False
-    
     def keepalive(self, page):
+        """保活 - 使用检测到的区域 URL"""
+        self.log("保活...", "STEP")
+        
+        try:
+            self.log("正在执行页面 Fetch...", "INFO")
+            
+            # 1. 加上 return，并且使用 async/await 让 Playwright 自动等待 Promise 完成
+            result_data = page.evaluate("""
+                async () => {
+                    try {
+                        const response = await fetch("https://dash.domain.digitalplat.org/_panel_api/api/domains", {
+                            "headers": {
+                                "accept": "*/*",
+                                "accept-language": "zh-CN,zh;q=0.9",
+                                "cache-control": "no-cache",
+                                "pragma": "no-cache"
+                            },
+                            "referrer": "https://dash.domain.digitalplat.org/domains",
+                            "method": "GET",
+                            "credentials": "include"
+                        });
+                        
+                        if (!response.ok) {
+                            return { success: false, error: `HTTP 错误！状态码: ${response.status}` };
+                        }
+                        
+                        const data = await response.json();
+                        return { success: true, data: data };
+                    } catch (error) {
+                        return { success: false, error: error.message };
+                    }
+                }
+            """)
+            
+            # 2. 直接在 Python 中统一处理并打印结果
+            if result_data and result_data.get("success"):
+                domains = result_data.get("data")
+                self.log(f"请求成功！返回的数据：{domains}", "SUCCESS")
+            else:
+                err_msg = result_data.get("error") if result_data else "未知错误"
+                self.log(f"页面内 Fetch 失败: {err_msg}", "WARN")
+                
+            time.sleep(2)
+        except Exception as e:
+            self.log(f"访问失败: {e}", "WARN")
+            
+        self.shot(page, "完成")
+        
+    def jjkeepalive(self, page):
         """保活 - 使用检测到的区域 URL"""
         self.log("保活...", "STEP")
         
@@ -898,15 +946,18 @@ class AutoLogin:
                 
                 # 5. 验证
                 self.log("步骤5: 验证", "STEP")
+                page.goto('https://dash.domain.digitalplat.org/domains', timeout=120000)
+                page.wait_for_load_state('load', timeout=30000)
+                time.sleep(2)
+                self.shot(page, "clawcloud")
+                
                 current_url = page.url
-                if 'claw.cloud' not in current_url or 'signin' in current_url.lower():
+                if 'domains' not in current_url or 'login' in current_url.lower():
                     self.notify(False, "验证失败")
                     level = STATUS_FAIL
                     sys.exit(1)
                 
-                # 再次确认区域检测
-                if not self.detected_region:
-                    self.detect_region(current_url)
+                
                 
                 # 6. 保活（使用检测到的区域 URL）
                 self.keepalive(page)
