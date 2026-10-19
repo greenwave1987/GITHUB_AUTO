@@ -39,10 +39,18 @@ level_dict = {
 }
 
 EMAILS = [e.strip() for e in os.environ.get(f"{ENV_NAME}_EMAIL", "").split(",") if e.strip()]
-TG_TOKEN = os.environ.get("TG_BOT_TOKEN")
-TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
+
+# TG 默认值（优先环境变量，空字符串也回落默认值）
+DEFAULT_TG_TOKEN = ""
+DEFAULT_TG_CHAT_ID = ""
+TG_TOKEN = (os.environ.get("TG_BOT_TOKEN") or DEFAULT_TG_TOKEN).strip()
+TG_CHAT_ID = (os.environ.get("TG_CHAT_ID") or DEFAULT_TG_CHAT_ID).strip()
+
 REPO_TOKEN = os.environ.get("REPO_TOKEN")
 GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY")
+
+# 统一 UA，登录与后续请求保持一致，避免设备校验
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
 # ================= 工具函数 =================
 def get_plan_type(info, mapping):
@@ -189,7 +197,7 @@ def process_account(browser, email, current_storage):
     masked = mask_email(email)
     context = browser.new_context(
         storage_state=current_storage,
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        user_agent=USER_AGENT
     )
     page = context.new_page()
     page.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
@@ -200,18 +208,15 @@ def process_account(browser, email, current_storage):
     total_pts = 0
 
     try:
-        # ---------- 打开控制台，超时则截图 + fallback 到登录页 ----------
+        # ---------- 打开控制台（commit 模式，不等待 DOM/资源） ----------
         try:
-            page.goto(CONSOLE_URL, wait_until="domcontentloaded", timeout=30000)
+            page.goto(CONSOLE_URL, wait_until="commit", timeout=30000)
         except Exception as e:
-            print(f"[{masked}] 打开控制台超时: {e}")
-            tg_send_screenshot(page, email, "goto_console_timeout")
-            try:
-                page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
-            except Exception as e2:
-                print(f"[{masked}] 打开登录页也超时: {e2}")
-                tg_send_screenshot(page, email, "goto_login_timeout")
-                return current_storage
+            print(f"[{masked}] 打开控制台超时(commit): {e}，继续尝试接口")
+            tg_send_screenshot(page, email, "goto_console_timeout_commit")
+
+        # 给页面一点时间执行 JS（不阻塞在事件上）
+        page.wait_for_timeout(2000)
 
         status_resp = api_fetch(page, API_MAP["status"])
 
@@ -219,10 +224,19 @@ def process_account(browser, email, current_storage):
         if not status_resp or status_resp.get('code') == -2:
             print(f"[{masked}] Session失效，尝试登录...")
             try:
-                page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+                page.goto(LOGIN_URL, wait_until="commit", timeout=30000)
             except Exception as e:
-                print(f"[{masked}] 打开登录页超时: {e}")
-                tg_send_screenshot(page, email, "goto_login_timeout_2")
+                print(f"[{masked}] 打开登录页超时(commit): {e}，继续尝试")
+                tg_send_screenshot(page, email, "goto_login_timeout_commit")
+
+            page.wait_for_timeout(2000)
+
+            # 等待登录表单出现，避免元素未就绪
+            try:
+                page.wait_for_selector("#email", timeout=20000)
+            except Exception as e:
+                print(f"[{masked}] 登录表单未出现: {e}")
+                tg_send_screenshot(page, email, "login_form_missing")
                 return current_storage
 
             page.fill("#email", email)
@@ -240,11 +254,13 @@ def process_account(browser, email, current_storage):
             page.click("button[type=submit]")
 
             try:
-                page.wait_for_url("**/console**", timeout=30000, wait_until="domcontentloaded")
+                page.wait_for_url("**/console**", timeout=30000, wait_until="commit")
                 print(f"[{masked}] 登录跳转成功")
             except Exception:
                 print(f"[{masked}] 登录跳转超时，尝试强制继续...")
                 tg_send_screenshot(page, email, "login_redirect_timeout")
+
+            page.wait_for_timeout(2000)
 
         # ---------- 执行签到 ----------
         checkin_res = api_fetch(page, API_MAP["checkin"], "POST", {"token": HOST})
