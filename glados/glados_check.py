@@ -175,7 +175,7 @@ def process_account(browser, email, current_storage):
     total_pts = 0
 
     try:
-        page.goto(CONSOLE_URL, wait_until="networkidle")
+        page.goto(CONSOLE_URL, wait_until="domcontentloaded")
         status_resp = api_fetch(page, API_MAP["status"])
         
         # 登录失效判断
@@ -195,7 +195,7 @@ def process_account(browser, email, current_storage):
             page.click("button[type=submit]")
             
             try:
-                page.wait_for_url("**/console**", timeout=30000, wait_until="networkidle")
+                page.wait_for_url("**/console**", timeout=30000, wait_until="domcontentloaded")
                 print(f"[{masked}] 登录跳转成功")
             except Exception:
                 print(f"[{masked}] 登录跳转超时，尝试强制继续...")
