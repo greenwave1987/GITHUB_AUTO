@@ -10,8 +10,8 @@ from nacl import encoding, public
 from playwright.sync_api import sync_playwright
 
 # ================= 配置 =================
-HOST='glados.cloud'
-ENV_NAME='GLADOS'
+HOST = 'glados.cloud'
+ENV_NAME = 'GLADOS'
 LOGIN_URL = f"https://{HOST}/login"
 CONSOLE_URL = f"https://{HOST}/console/account"
 
@@ -53,12 +53,14 @@ def get_plan_type(info, mapping):
         return "Data Format Error"
 
 def mask_email(email):
-    if not email or "@" not in email: return email
+    if not email or "@" not in email:
+        return email
     prefix, domain = email.split('@')
     return f"{prefix[:2]}**{prefix[-1]}@{domain}" if len(prefix) > 2 else f"{prefix[0]}**@{domain}"
 
 def tg_send(text):
-    if not (TG_TOKEN and TG_CHAT_ID): return
+    if not (TG_TOKEN and TG_CHAT_ID):
+        return
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     try:
         requests.post(url, json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
@@ -66,13 +68,36 @@ def tg_send(text):
         print(f"发送TG消息失败: {e}")
 
 def tg_send_photo(photo_path, caption):
-    if not (TG_TOKEN and TG_CHAT_ID): return
+    if not (TG_TOKEN and TG_CHAT_ID):
+        return
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
     try:
         with open(photo_path, "rb") as photo:
             requests.post(url, data={"chat_id": TG_CHAT_ID, "caption": caption}, files={"photo": photo}, timeout=20)
     except Exception as e:
         print(f"发送TG图片失败: {e}")
+
+def tg_send_screenshot(page, email, tag="error"):
+    """出错时截图并发送到 TG，任何异常都不影响主流程"""
+    if not (TG_TOKEN and TG_CHAT_ID):
+        return
+    path = f"shot_{tag}_{email.split('@')[0]}.png"
+    try:
+        page.screenshot(path=path, full_page=False, timeout=10000)
+        masked = mask_email(email)
+        try:
+            current_url = page.url
+        except Exception:
+            current_url = "unknown"
+        tg_send_photo(path, f"📸 {ENV_NAME} 截图\n账号: {masked}\n阶段: {tag}\nURL: {current_url}")
+    except Exception as e:
+        print(f"[{email}] 截图失败({tag}): {e}")
+    finally:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
 
 def tg_wait_code(email, send_time, timeout=300):
     masked = mask_email(email)
@@ -99,7 +124,6 @@ def tg_wait_code(email, send_time, timeout=300):
     return None
 
 def api_fetch(page, url, method="GET", body=None):
-    # body 传入字典，在 Python 层处理 json.dumps
     body_json = json.dumps(body) if body else "null"
     js_code = f"""
     async () => {{
@@ -122,11 +146,12 @@ def api_fetch(page, url, method="GET", body=None):
 
 def generate_trend_chart(points_data, email):
     history = points_data.get("history", [])
-    if not history: return None
+    if not history:
+        return None
     recent_history = list(reversed(history))
     dates = [datetime.fromtimestamp(i['time']/1000).strftime('%m-%d') for i in recent_history]
     balances = [float(i.get('change', 0)) / 100 if float(i.get('change', 0)) < 0 else float(i.get('change', 0)) for i in recent_history]
-    
+
     plt.figure(figsize=(10, 5))
     plt.plot(dates, balances, marker='o', color='#2196F3', linewidth=2)
     plt.fill_between(dates, balances, color='#2196F3', alpha=0.1)
@@ -138,7 +163,8 @@ def generate_trend_chart(points_data, email):
     return img_path
 
 def update_github_secret(new_value):
-    if not (REPO_TOKEN and GITHUB_REPO): return
+    if not (REPO_TOKEN and GITHUB_REPO):
+        return
     headers = {"Authorization": f"token {REPO_TOKEN}", "Accept": "application/vnd.github+json"}
     try:
         key_url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/public-key"
@@ -168,52 +194,72 @@ def process_account(browser, email, current_storage):
     page = context.new_page()
     page.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
 
-    # 初始化关键变量
     result = "Unknown"
     level = "Unknown"
     left_days = 0
     total_pts = 0
 
     try:
-        page.goto(CONSOLE_URL, wait_until="domcontentloaded")
+        # ---------- 打开控制台，超时则截图 + fallback 到登录页 ----------
+        try:
+            page.goto(CONSOLE_URL, wait_until="domcontentloaded", timeout=30000)
+        except Exception as e:
+            print(f"[{masked}] 打开控制台超时: {e}")
+            tg_send_screenshot(page, email, "goto_console_timeout")
+            try:
+                page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+            except Exception as e2:
+                print(f"[{masked}] 打开登录页也超时: {e2}")
+                tg_send_screenshot(page, email, "goto_login_timeout")
+                return current_storage
+
         status_resp = api_fetch(page, API_MAP["status"])
-        
-        # 登录失效判断
+
+        # ---------- 登录失效判断 ----------
         if not status_resp or status_resp.get('code') == -2:
             print(f"[{masked}] Session失效，尝试登录...")
-            page.goto(LOGIN_URL)
+            try:
+                page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+            except Exception as e:
+                print(f"[{masked}] 打开登录页超时: {e}")
+                tg_send_screenshot(page, email, "goto_login_timeout_2")
+                return current_storage
+
             page.fill("#email", email)
             click_time = time.time()
             page.click("button:has-text('Get Code')")
-            
+            tg_send_screenshot(page, email, "after_get_code")
+
             code = tg_wait_code(email, click_time)
-            if not code: 
+            if not code:
                 print(f"[{masked}] 未能获取验证码，跳过")
-                return None
-            
+                tg_send_screenshot(page, email, "no_code")
+                return current_storage
+
             page.fill("#mailcode", code)
             page.click("button[type=submit]")
-            
+
             try:
                 page.wait_for_url("**/console**", timeout=30000, wait_until="domcontentloaded")
                 print(f"[{masked}] 登录跳转成功")
             except Exception:
                 print(f"[{masked}] 登录跳转超时，尝试强制继续...")
+                tg_send_screenshot(page, email, "login_redirect_timeout")
 
-        # 执行签到
+        # ---------- 执行签到 ----------
         checkin_res = api_fetch(page, API_MAP["checkin"], "POST", {"token": HOST})
         checkin_msg = "✅ 签到成功" if checkin_res.get("code") == 0 else "⚠️ 今日已签到"
-        
-        # 重新获取状态
+
+        # ---------- 重新获取状态 ----------
         status_resp = api_fetch(page, API_MAP["status"])
         url = "null"
-        
+
         if status_resp and status_resp.get('code') == 0:
             d = status_resp["data"]
             result = get_plan_type(d, level_dict)
             level = f"VIP 等级: {d.get('vip')}，套餐: {result}"
             left_days = d.get("leftDays", 0)
-            
+
             site = d.get("site")
             if site == "glados.network":
                 url = f"https://update.glados-config.com/mihomo/{d.get('userId')}/{d.get('code')}/{d.get('port')}/glados.yaml"
@@ -224,13 +270,13 @@ def process_account(browser, email, current_storage):
 
         points_data = api_fetch(page, API_MAP["points"])
         total_pts = points_data.get("points", 0)
-        
+
         traffic_resp = api_fetch(page, API_MAP["traffic"])
         traffic_data = traffic_resp.get("data", {})
         used_gb = traffic_data.get("today", 0) / (1024**3)
-        limit_gb = traffic_data.get("limit", 0) / 100 # 保持原逻辑
+        limit_gb = traffic_data.get("limit", 0) / 100
 
-        # 自动兑换逻辑
+        # ---------- 自动兑换逻辑 ----------
         if result == 'Basic':
             plan_type = ""
             limit_gb = 200
@@ -244,9 +290,8 @@ def process_account(browser, email, current_storage):
                     plan_type = "plan200"
                 elif pts_val > 99:
                     plan_type = "plan100"
-            
+
             if plan_type:
-                # 修复 JSON.stringify 错误，直接传 body 字典
                 exchange_data = api_fetch(page, API_MAP["exchange"], "POST", {"planType": plan_type})
                 if exchange_data.get('code') == 0:
                     ex_msg = f"🎁 GLaDOS 兑换成功！\n账号: {email}\n兑换：{plan_type}"
@@ -268,7 +313,8 @@ def process_account(browser, email, current_storage):
         chart_path = generate_trend_chart(points_data, email)
         if chart_path:
             tg_send_photo(chart_path, summary)
-            if os.path.exists(chart_path): os.remove(chart_path)
+            if os.path.exists(chart_path):
+                os.remove(chart_path)
         else:
             tg_send(summary)
 
@@ -276,6 +322,10 @@ def process_account(browser, email, current_storage):
 
     except Exception as e:
         print(f"[{masked}] 运行出错: {str(e)}")
+        try:
+            tg_send_screenshot(page, email, "exception")
+        except Exception:
+            pass
         return current_storage
     finally:
         context.close()
@@ -285,7 +335,7 @@ def run():
     local_raw = os.environ.get(f"{ENV_NAME}_LOCAL", "{}")
     try:
         storage_dict = json.loads(local_raw)
-    except:
+    except Exception:
         storage_dict = {}
 
     new_storage_dict = {}
@@ -296,14 +346,13 @@ def run():
                 wait = random.randint(30, 60)
                 print(f"等待 {wait}s 后处理下一账号...")
                 time.sleep(wait)
-            
+
             res_state = process_account(browser, email, storage_dict.get(email))
             if res_state:
                 new_storage_dict[email] = res_state
         browser.close()
 
     if new_storage_dict:
-        # 只有当 storage 真的改变时才更新
         if json.dumps(new_storage_dict, sort_keys=True) != json.dumps(storage_dict, sort_keys=True):
             update_github_secret(json.dumps(new_storage_dict))
 
