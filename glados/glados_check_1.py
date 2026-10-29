@@ -4,176 +4,406 @@ import time
 import requests
 import base64
 import random
-from nacl import encoding, public
-from playwright.sync_api import sync_playwright
 import matplotlib.pyplot as plt
 from datetime import datetime
+from nacl import encoding, public
+from playwright.sync_api import sync_playwright
+from engine.main import ConfigReader
+from glados_mail import fetch_glados_code
 
-# ---------- 配置与常量 ----------
-LOGIN_URL = "https://glados.cloud/login"
-CONSOLE_URL = "https://glados.cloud/console/account"
-STATUS_API = "https://glados.cloud/api/user/status"
-POINTS_API = "https://glados.cloud/api/user/points"
-CHECKIN_API = "https://glados.cloud/api/user/checkin"
+# ================= 配置 =================
+HOST = 'glados.cloud'
+ENV_NAME = 'GLADOS'
+LOGIN_URL = f"https://{HOST}/login"
+CONSOLE_URL = f"https://{HOST}/console/account"
 
-EMAILS = os.environ["GLADOS_EMAIL"].split(",")
-TG_TOKEN = os.environ["TG_BOT_TOKEN"]
-TG_CHAT_ID = os.environ["TG_CHAT_ID"]
-REPO_TOKEN = os.environ["REPO_TOKEN"]
-GITHUB_REPO = os.environ["GITHUB_REPOSITORY"]
+API_MAP = {
+    "status": f"https://{HOST}/api/user/status",
+    "points": f"https://{HOST}/api/user/points",
+    "checkin": f"https://{HOST}/api/user/checkin",
+    "traffic": f"https://{HOST}/api/user/traffic",
+    "assets": f"https://{HOST}/api/user/assets",
+    "exchange": f"https://{HOST}/api/user/exchange"
+}
+
+level_dict = {
+    0: "Free",
+    6: "Expired",
+    7: "Reset",
+    8: "Overlimit",
+    9: "Spam",
+    10: "Free",
+    11: "Edu",
+    21: "Basic",
+    31: "Pro",
+    41: "Team",
+    51: "Enterprise"
+}
+
+EMAILS = [e.strip() for e in os.environ.get(f"{ENV_NAME}_EMAIL", "").split(",") if e.strip()]
+
+# TG 默认值（优先环境变量，空字符串也回落默认值）
+DEFAULT_TG_TOKEN = ""
+DEFAULT_TG_CHAT_ID = ""
+TG_TOKEN = (os.environ.get("TG_BOT_TOKEN") or DEFAULT_TG_TOKEN).strip()
+TG_CHAT_ID = (os.environ.get("TG_CHAT_ID") or DEFAULT_TG_CHAT_ID).strip()
+
+REPO_TOKEN = os.environ.get("REPO_TOKEN")
+GITHUB_REPO = os.environ.get("GITHUB_REPOSITORY")
+
+# 统一 UA，登录与后续请求保持一致，避免设备校验
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
+# ================= 工具函数 =================
+def get_plan_type(info, mapping):
+    try:
+        vip_level = info.get('vip', 0)
+        return mapping.get(vip_level, "Unknown")
+    except Exception:
+        return "Data Format Error"
+
+def mask_email(email):
+    if not email or "@" not in email:
+        return email
+    prefix, domain = email.split('@')
+    return f"{prefix[:2]}**{prefix[-1]}@{domain}" if len(prefix) > 2 else f"{prefix[0]}**@{domain}"
 
 def tg_send(text):
-    print(f"[STEP] 📤 发送 TG 消息: {text[:20]}...")
+    if not (TG_TOKEN and TG_CHAT_ID):
+        return
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TG_CHAT_ID, "text": text}, timeout=10)
+    try:
+        requests.post(url, json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
+    except Exception as e:
+        print(f"发送TG消息失败: {e}")
 
 def tg_send_photo(photo_path, caption):
-    """发送图片到 Telegram"""
-    print(f"[STEP] 🖼️ 发送趋势图...")
+    if not (TG_TOKEN and TG_CHAT_ID):
+        return
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
-    with open(photo_path, "rb") as photo:
-        requests.post(url, data={"chat_id": TG_CHAT_ID, "caption": caption}, files={"photo": photo}, timeout=20)
+    try:
+        with open(photo_path, "rb") as photo:
+            requests.post(url, data={"chat_id": TG_CHAT_ID, "caption": caption}, files={"photo": photo}, timeout=20)
+    except Exception as e:
+        print(f"发送TG图片失败: {e}")
+
+def tg_send_screenshot(page, email, tag="error"):
+    """出错时截图并发送到 TG，任何异常都不影响主流程"""
+    if not (TG_TOKEN and TG_CHAT_ID):
+        return
+    path = f"shot_{tag}_{email.split('@')[0]}.png"
+    try:
+        page.screenshot(path=path, full_page=False, timeout=10000)
+        masked = mask_email(email)
+        try:
+            current_url = page.url
+        except Exception:
+            current_url = "unknown"
+        tg_send_photo(path, f"📸 {ENV_NAME} 截图\n账号: {masked}\n阶段: {tag}\nURL: {current_url}")
+    except Exception as e:
+        print(f"[{email}] 截图失败({tag}): {e}")
+    finally:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+def tg_wait_code(email, send_time, timeout=300):
+    masked = mask_email(email)
+    tg_send(f"📨 <b>{ENV_NAME} 验证码请求</b>\n账号: <code>{masked}</code>\n请在 {timeout//60} 分钟内回复：\n<code>/code 123456</code>")
+
+    offset = None
+    start_wait = time.time()
+    while time.time() - start_wait < timeout:
+        try:
+            url = f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates"
+            resp = requests.get(url, params={"offset": offset, "timeout": 10}, timeout=15).json()
+            for item in resp.get("result", []):
+                offset = item["update_id"] + 1
+                msg = item.get("message", {})
+                text = msg.get("text", "")
+                if text.startswith("/code"):
+                    if msg.get("date", 0) >= int(send_time):
+                        code = text.replace("/code", "").strip()
+                        print(f"收到验证码: {code}")
+                        return code
+        except Exception as e:
+            print(f"轮询TG验证码出错: {e}")
+        time.sleep(5)
+    return None
+
+def api_fetch(page, url, method="GET", body=None):
+    body_json = json.dumps(body) if body else "null"
+    js_code = f"""
+    async () => {{
+        try {{
+            const options = {{
+                method: "{method}",
+                headers: {{"Content-Type": "application/json"}}
+            }};
+            if ("{method}" === "POST" && {body_json} !== null) {{
+                options.body = JSON.stringify({body_json});
+            }}
+            const r = await fetch("{url}", options);
+            return r.ok ? await r.json() : {{code: -1, msg: "HTTP Error " + r.status}};
+        }} catch (e) {{
+            return {{code: -1, msg: e.message}};
+        }}
+    }}
+    """
+    return page.evaluate(js_code)
 
 def generate_trend_chart(points_data, email):
-    """生成积分趋势图"""
     history = points_data.get("history", [])
-    if not history: return None
-    
-    dates = [datetime.fromtimestamp(i['time']/1000).strftime('%m-%d') for i in reversed(history)]
-    balances = [float(i['change']) for i in reversed(history)]
-    
+    if not history:
+        return None
+    recent_history = list(reversed(history))
+    dates = [datetime.fromtimestamp(i['time']/1000).strftime('%m-%d') for i in recent_history]
+    balances = [float(i.get('change', 0)) / 100 if float(i.get('change', 0)) < 0 else float(i.get('change', 0)) for i in recent_history]
+
     plt.figure(figsize=(10, 5))
-    plt.plot(dates, balances, marker='o', color='#007bff', linewidth=2)
-    plt.fill_between(dates, balances, color='#007bff', alpha=0.1)
-    plt.title(f"Points Trend: {email}", fontsize=12)
-    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-    
+    plt.plot(dates, balances, marker='o', color='#2196F3', linewidth=2)
+    plt.fill_between(dates, balances, color='#2196F3', alpha=0.1)
+    plt.title(f"Points History: {mask_email(email)}")
+    plt.grid(True, linestyle="--", alpha=0.3)
     img_path = f"trend_{email.split('@')[0]}.png"
     plt.savefig(img_path)
     plt.close()
     return img_path
 
-# ... [保留你原有的 encrypt_secret 和 update_secret 函数] ...
-
-def encrypt_secret(public_key: str, secret_value: str) -> str:
-    public_key_obj = public.PublicKey(public_key.encode("utf-8"), encoding.Base64Encoder())
-    sealed_box = public.SealedBox(public_key_obj)
-    encrypted = sealed_box.encrypt(secret_value.encode("utf-8"))
-    return base64.b64encode(encrypted).decode("utf-8")
-
-def update_secret(name, value):
+def update_github_secret(new_value):
+    if not (REPO_TOKEN and GITHUB_REPO):
+        return
     headers = {"Authorization": f"token {REPO_TOKEN}", "Accept": "application/vnd.github+json"}
-    key_url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/public-key"
-    key_resp = requests.get(key_url, headers=headers).json()
-    if "key" not in key_resp: return
-    encrypted_value = encrypt_secret(key_resp["key"], value)
-    put_url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/{name}"
-    put_data = {"encrypted_value": encrypted_value, "key_id": key_resp["key_id"]}
-    requests.put(put_url, headers=headers, json=put_data)
+    try:
+        key_url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/public-key"
+        key_resp = requests.get(key_url, headers=headers).json()
+        public_key = key_resp["key"]
+        key_id = key_resp["key_id"]
+        pk = public.PublicKey(public_key.encode("utf-8"), encoding.Base64Encoder())
+        sealed_box = public.SealedBox(pk)
+        encrypted = base64.b64encode(sealed_box.encrypt(new_value.encode("utf-8"))).decode("utf-8")
+        requests.put(
+            f"https://api.github.com/repos/{GITHUB_REPO}/actions/secrets/{ENV_NAME}_LOCAL",
+            headers=headers,
+            json={"encrypted_value": encrypted, "key_id": key_id}
+        )
+        print("Successfully updated GitHub Secret.")
+    except Exception as e:
+        print(f"Update Secret Failed: {e}")
 
-def tg_wait_code(email, send_time, timeout=300):
-    tg_send(f"📨 GLaDOS 验证码\n账号: {email}\n请回复：/code 123456")
-    offset, start_wait = None, time.time()
-    while time.time() - start_wait < timeout:
+# ================= 核心流程 =================
+
+def process_account(browser, email, current_storage,email_info):
+    masked = mask_email(email)
+    context = browser.new_context(
+        storage_state=current_storage,
+        user_agent=USER_AGENT
+    )
+    page = context.new_page()
+    page.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
+
+    result = "Unknown"
+    level = "Unknown"
+    left_days = 0
+    total_pts = 0
+
+    try:
+        # ---------- 打开控制台（commit 模式，不等待 DOM/资源） ----------
         try:
-            resp = requests.get(f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates", params={"offset": offset, "timeout": 10}).json()
-            for item in resp.get("result", []):
-                offset = item["update_id"] + 1
-                msg = item.get("message", {})
-                if msg.get("text", "").startswith("/code"):
-                    if msg.get("date", 0) >= int(send_time):
-                        return msg.get("text").replace("/code", "").strip()
-        except: pass
-        time.sleep(5)
-    return None
+            page.goto(CONSOLE_URL, wait_until="commit", timeout=30000)
+        except Exception as e:
+            print(f"[{masked}] 打开控制台超时(commit): {e}，继续尝试接口")
+            tg_send_screenshot(page, email, "goto_console_timeout_commit")
 
-def check_session_by_points(page):
-    try:
-        time.sleep(2)
-        result = page.evaluate(f'async () => {{ const r = await fetch("{POINTS_API}"); return r.ok ? await r.json() : null; }}')
-        return result and result.get('code') == 0
-    except: return False
+        # 给页面一点时间执行 JS（不阻塞在事件上）
+        page.wait_for_timeout(2000)
 
-def run():
-    print("====== GLaDOS 自动签到开始 ======")
-    local_raw = os.environ.get("GLADOS_LOCAL", "[]")
-    try:
-        local_storage_list = json.loads(local_raw)
-        if not isinstance(local_storage_list, list): local_storage_list = [local_storage_list]
-    except: local_storage_list = []
+        status_resp = api_fetch(page, API_MAP["status"])
 
-    final_storage_list = []
+        # ---------- 登录失效判断 ----------
+        if not status_resp or status_resp.get('code') == -2:
+            print(f"[{masked}] Session失效，尝试登录...")
+            try:
+                page.goto(LOGIN_URL, wait_until="commit", timeout=30000)
+            except Exception as e:
+                print(f"[{masked}] 打开登录页超时(commit): {e}，继续尝试")
+                tg_send_screenshot(page, email, "goto_login_timeout_commit")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-blink-features=AutomationControlled"])
-        
-        for index, email in enumerate(EMAILS):
+            page.wait_for_timeout(2000)
+
+            # 等待登录表单出现，避免元素未就绪
+            try:
+                page.wait_for_selector("#email", timeout=20000)
+            except Exception as e:
+                print(f"[{masked}] 登录表单未出现: {e}")
+                tg_send_screenshot(page, email, "login_form_missing")
+                return current_storage
+
+            page.fill("#email", email)
+            click_time = time.time()
+            page.click("button:has-text('Get Code')")
+            tg_send_screenshot(page, email, "after_get_code")
+            code = ""
+            if email_info:
+                username = email_info["username"]
+                password = email_info["password"]
+                host = os.environ.get("IMAP_HOST") or None   # 空则自动推断
+                max_wait = int(os.environ.get("MAX_WAIT_SECONDS", "120"))
+                poll_interval = int(os.environ.get("POLL_INTERVAL", "10"))
+                fetch_limit = int(os.environ.get("FETCH_LIMIT", "20"))
             
-            # --- 随机等待，模拟真人操作 ---
-            sleep_time = random.randint(60, 120)
-            print(f"[WAIT] ⏳ 随机等待 {sleep_time} 秒...")
-            time.sleep(sleep_time)
-            email = email.strip()
-            print(f"\n>>> 处理账号: {email}")
-            current_storage = local_storage_list[index] if index < len(local_storage_list) else None
+                code = fetch_glados_code(
+                    username, password, host,
+                    max_wait=max_wait,
+                    poll_interval=poll_interval,
+                    fetch_limit=fetch_limit,
+                    verbose=True,
+                )
+        
+            if not code:
+                code = tg_wait_code(email, click_time)
+            if not code:
+                print(f"[{masked}] 未能获取验证码，跳过")
+                tg_send_screenshot(page, email, "no_code")
+                return current_storage
 
-            context = browser.new_context(storage_state=current_storage, viewport={"width": 1920, "height": 1080}, user_agent="Mozilla/5.0 Chrome/128.0.0.0")
-            page = context.new_page()
+            page.fill("#mailcode", code)
+            page.click("button[type=submit]")
 
             try:
-                page.goto(CONSOLE_URL)
-                if not check_session_by_points(page):
-                    print(f"[INFO] {email} Session失效，开始登录")
-                    page.goto(LOGIN_URL)
-                    page.fill("#email", email)
-                    click_t = time.time()
-                    page.click("button:has-text('Get Code')")
-                    code = tg_wait_code(email, click_t)
-                    if not code: continue
-                    page.fill("#mailcode", code)
-                    page.click("button[type=submit]")
-                    page.wait_for_load_state("networkidle")
-                
-                # --- 核心修改：签到 + 获取状态 + 获取积分 ---
-                if check_session_by_points(page):
-                    print(f"✅ 账号 {email} 在线，开始自动化流程")
-                    
-                    # 1. 签到
-                    page.evaluate(f'fetch("{CHECKIN_API}", {{method:"POST", headers:{{"content-type":"application/json"}}, body:JSON.stringify({{token:"glados.cloud"}}) }})')
-                    
-                    # 2. 获取剩余天数
-                    status_json = page.evaluate(f'async () => {{ const r = await fetch("{STATUS_API}"); return await r.json(); }}')
-                    left_days = int(float(status_json['data'].get('leftDays', 0)))
-                    
-                    # 3. 获取积分历史并绘图
-                    points_json = page.evaluate(f'async () => {{ const r = await fetch("{POINTS_API}"); return await r.json(); }}')
-                    total_points = int(float(points_json.get('points', 0)))
-                    
-                    chart_path = generate_trend_chart(points_json, email)
-                    
-                    # 4. 发送汇总消息
-                    summary = f"🎉 账号 {email} 签到完成\n⏳ 剩余天数: {left_days} 天\n💰 当前积分: {total_points}"
-                    if chart_path:
-                        tg_send_photo(chart_path, summary)
-                        os.remove(chart_path) # 发送完删除图片
-                    else:
-                        tg_send(summary)
+                page.wait_for_url("**/console**", timeout=30000, wait_until="commit")
+                print(f"[{masked}] 登录跳转成功")
+            except Exception:
+                print(f"[{masked}] 登录跳转超时，尝试强制继续...")
+                tg_send_screenshot(page, email, "login_redirect_timeout")
 
-                    final_storage_list.append(context.storage_state())
+            page.wait_for_timeout(2000)
+
+        # ---------- 执行签到 ----------
+        checkin_res = api_fetch(page, API_MAP["checkin"], "POST", {"token": HOST})
+        checkin_msg = "✅ 签到成功" if checkin_res.get("code") == 0 else "⚠️ 今日已签到"
+
+        # ---------- 重新获取状态 ----------
+        status_resp = api_fetch(page, API_MAP["status"])
+        url = "null"
+
+        if status_resp and status_resp.get('code') == 0:
+            d = status_resp["data"]
+            result = get_plan_type(d, level_dict)
+            level = f"VIP 等级: {d.get('vip')}，套餐: {result}"
+            left_days = d.get("leftDays", 0)
+
+            site = d.get("site")
+            if site == "glados.network":
+                url = f"https://update.glados-config.com/mihomo/{d.get('userId')}/{d.get('code')}/{d.get('port')}/glados.yaml"
+            elif site == "railgun.info":
+                url = f"https://update.railgunx.com/mihomo/e2308c94/{d.get('password')}/full.yaml"
+            else:
+                url = "未知站点结构"
+
+        points_data = api_fetch(page, API_MAP["points"])
+        total_pts = points_data.get("points", 0)
+
+        traffic_resp = api_fetch(page, API_MAP["traffic"])
+        traffic_data = traffic_resp.get("data", {})
+        used_gb = traffic_data.get("today", 0) / (1024**3)
+        limit_gb = traffic_data.get("limit", 0) / 100
+
+        # ---------- 自动兑换逻辑 ----------
+        if result == 'Basic':
+            plan_type = ""
+            limit_gb = 200
+            pts_val = int(float(total_pts))
+            days_val = int(float(left_days))
+
+            if pts_val > 499:
+                plan_type = "plan500"
+            elif days_val < 3:
+                if pts_val > 199:
+                    plan_type = "plan200"
+                elif pts_val > 99:
+                    plan_type = "plan100"
+
+            if plan_type:
+                exchange_data = api_fetch(page, API_MAP["exchange"], "POST", {"planType": plan_type})
+                if exchange_data.get('code') == 0:
+                    ex_msg = f"🎁 GLaDOS 兑换成功！\n账号: {email}\n兑换：{plan_type}"
+                    tg_send(ex_msg)
                 else:
-                    print(f"❌ 账号 {email} 状态异常")
-                    final_storage_list.append(current_storage)
+                    error_msg = exchange_data.get('message', '未知错误')
+                    tg_send(f"⚠️ GLaDOS 兑换失败\n账号: {email}\n原因: {error_msg}")
 
-            except Exception as e:
-                print(f"⚠️ {email} 运行出错: {e}")
-                final_storage_list.append(current_storage)
-            finally:
-                context.close()
+        summary = (
+            f"👤 账号: {masked}\n"
+            f"🏆 {level}\n"
+            f"{checkin_msg}\n"
+            f"⏳ 剩余: {int(float(left_days))} 天\n"
+            f"📊 流量: {used_gb:.2f}G / {limit_gb:.0f}G\n"
+            f"💰 积分: {int(float(total_pts))}\n"
+            f"🔗 订阅: {url}"
+        )
+
+        chart_path = generate_trend_chart(points_data, email)
+        if chart_path:
+            tg_send_photo(chart_path, summary)
+            if os.path.exists(chart_path):
+                os.remove(chart_path)
+        else:
+            tg_send(summary)
+
+        return context.storage_state()
+
+    except Exception as e:
+        print(f"[{masked}] 运行出错: {str(e)}")
+        try:
+            tg_send_screenshot(page, email, "exception")
+        except Exception:
+            pass
+        return current_storage
+    finally:
+        context.close()
+
+def run(): 
+    print(f"🚀 {ENV_NAME} 自动化任务启动")
+
+    if config is None:
+        config = ConfigReader()
+    EMAIL_INFO = config.get_value("EMAIL_INFO")    
+    
+    local_raw = os.environ.get(f"{ENV_NAME}_LOCAL", "{}")
+    try:
+        storage_dict = json.loads(local_raw)
+    except Exception:
+        storage_dict = {}
+
+    new_storage_dict = {}
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+        for index, email in enumerate(EMAILS):
+            print(f"第 {index} 个账号：")
+            if index > 0:
+                wait = random.randint(30, 60)
+                print(f"等待 {wait}s 后处理下一账号...")
+                time.sleep(wait)
+
+            for info in email_info:
+                if info["username"] == email:
+                    # 校验密码
+                    if info["password"]:
+                        email_info=EMAIL_INFO[index]
+                    else:
+                        print(f"不存在密码，无法自动获取验证码！")
+
+            res_state = process_account(browser, email, storage_dict.get(email),email_info)
+            if res_state:
+                new_storage_dict[email] = res_state
         browser.close()
 
-    if final_storage_list:
-        update_secret("GLADOS_LOCAL", json.dumps(final_storage_list))
-    print("====== 任务结束 ======")
+    if new_storage_dict:
+        if json.dumps(new_storage_dict, sort_keys=True) != json.dumps(storage_dict, sort_keys=True):
+            update_github_secret(json.dumps(new_storage_dict))
 
 if __name__ == "__main__":
     run()
