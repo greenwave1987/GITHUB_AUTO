@@ -23,7 +23,7 @@ jobs:
       - name: Install deps
         run: |
           python -u -m pip install --upgrade pip
-          python -u -m pip install playwright requests pynacl matplotlib
+          python -u -m pip install playwright requests pynacl matplotlib imap-tools
           python -u -m playwright install chromium
 
       - name: Run GLaDOS auto login & checkin
@@ -35,7 +35,7 @@ jobs:
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          python -u glados/glados_check.py
+          python -u glados/glados_check_1.py
       - name: 🧹 清理旧的工作流运行记录
         uses: Mattraks/delete-workflow-runs@v2
         with:
