@@ -23,7 +23,7 @@ jobs:
       - name: Install deps
         run: |
           python -u -m pip install --upgrade pip
-          python -u -m pip install playwright requests pynacl matplotlib imap-tools
+          python -u -m pip install playwright requests pynacl matplotlib imap-tools cryptography
           python -u -m playwright install chromium
 
       - name: Run GLaDOS auto login & checkin
