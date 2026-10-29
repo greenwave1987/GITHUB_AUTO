@@ -391,11 +391,11 @@ def run():
                 print(f"等待 {wait}s 后处理下一账号...")
                 time.sleep(wait)
 
-            for info in email_info:
+            for info in EMAIL_INFO:
                 if info["username"] == email:
                     # 校验密码
                     if info["password"]:
-                        email_info=EMAIL_INFO[index]
+                        email_info=info
                     else:
                         print(f"不存在密码，无法自动获取验证码！")
 
