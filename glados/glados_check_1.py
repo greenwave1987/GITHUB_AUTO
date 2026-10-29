@@ -385,7 +385,7 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         for index, email in enumerate(EMAILS):
-            print(f"第 {index} 个账号：")
+            
             if index > 0:
                 wait = random.randint(30, 60)
                 print(f"等待 {wait}s 后处理下一账号...")
@@ -398,7 +398,7 @@ def run():
                         email_info=info
                     else:
                         print(f"不存在密码，无法自动获取验证码！")
-
+            print(f"第 {index} 个账号：{mask_email(email)}")
             res_state = process_account(browser, email, storage_dict.get(email),email_info)
             if res_state:
                 new_storage_dict[email] = res_state
