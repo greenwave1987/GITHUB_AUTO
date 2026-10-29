@@ -21,7 +21,7 @@ jobs:
       - name: Install deps
         run: |
           python -u -m pip install --upgrade pip
-          python -u -m pip install imap-tools cryptography requests
+          python -u -m pip install imap-tools cryptography requests pynacl
 
       - name: Run test
         env:
