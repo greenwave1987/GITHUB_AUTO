@@ -1,0 +1,40 @@
+name: Email_test.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 19 * * *"
+permissions:
+      contents: write
+      actions: write
+jobs:
+  GLaDOS:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install deps
+        run: |
+          python -u -m pip install --upgrade pip
+          python -u -m pip install imap-tools cryptography
+
+      - name: Run test
+        env:
+          CONFIG_PASSWORD: ${{ secrets.CONFIG_PASSWORD }}
+        run: |
+          python -u glados/Email_test.py
+      - name: 🧹 清理旧的工作流运行记录
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: ${{ github.workflow }}
+          retain_days: 0
+          keep_minimum_runs: 3
