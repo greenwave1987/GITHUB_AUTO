@@ -372,8 +372,7 @@ def process_account(browser, email, current_storage,email_info):
 def run(): 
     print(f"🚀 {ENV_NAME} 自动化任务启动")
 
-    if config is None:
-        config = ConfigReader()
+    config = ConfigReader()
     EMAIL_INFO = config.get_value("EMAIL_INFO")    
     
     local_raw = os.environ.get(f"{ENV_NAME}_LOCAL", "{}")
