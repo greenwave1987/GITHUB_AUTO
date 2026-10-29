@@ -53,7 +53,8 @@ def run():
             print(f"  [{mask_email(username)}] 未能获取验证码，跳过")
         else:
             print(f"  获取到验证码 [{code}]！")
-
+        print(f"等待 {10}s 后处理下一账号...")
+        time.sleep(10)
 
 if __name__ == "__main__":
     run()
