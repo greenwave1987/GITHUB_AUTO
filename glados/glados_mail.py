@@ -7,7 +7,7 @@ GLaDOS 验证码收取模块（可被任意 Python 项目 import）。
     from glados_mail import fetch_glados_code
 
     code = fetch_glados_code("a@126.com", "授权码")
-    print(code)   # 6 位字符串，或 None
+    print(code)   # 5~6 位字符串，或 None
 
     # 也可手动指定服务器
     code = fetch_glados_code("x@corp.com", "pwd", host="mail.corp.com")
@@ -20,6 +20,8 @@ import re
 import time
 import html as htmllib
 from email.header import decode_header
+from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 try:
@@ -76,7 +78,7 @@ def _is_gmail(host: str) -> bool:
     return "gmail" in host.lower()
 
 
-# ============ 验证码提取（纯函数） ============
+# ============ 验证码提取（纯函数，支持 5~6 位） ============
 def strip_html(raw_html: str) -> str:
     if not raw_html:
         return ""
@@ -86,18 +88,23 @@ def strip_html(raw_html: str) -> str:
 
 
 def extract_glados_code(text: str, html: str) -> Optional[str]:
-    """从纯文本/HTML 中提取 GLaDOS 6 位验证码。"""
-    m = re.search(r"verification\s+code\s+is\s*[:\s]*\n*\s*(\d{6})", text or "", re.I)
+    """从纯文本/HTML 中提取 GLaDOS 5~6 位验证码。"""
+    # 1) 关键词后允许换行/空白，匹配 5~6 位数字
+    m = re.search(r"verification\s+code\s+is\s*[:\s]*\n*\s*(\d{5,6})", text or "", re.I)
     if m:
         return m.group(1)
+    # 2) 独占一行的 5~6 位数字
     for line in (text or "").splitlines():
-        if re.fullmatch(r"\d{6}", line.strip()):
-            return line.strip()
+        s = line.strip()
+        if re.fullmatch(r"\d{5,6}", s):
+            return s
+    # 3) HTML 剥标签后再匹配
     plain = strip_html(html)
-    m = re.search(r"verification\s+code\s+is\s*[:\s]*(\d{6})", plain, re.I)
+    m = re.search(r"verification\s+code\s+is\s*[:\s]*(\d{5,6})", plain, re.I)
     if m:
         return m.group(1)
-    m = re.search(r"\b(\d{6})\b", plain)
+    # 4) 兜底：任意独立的 5~6 位数字
+    m = re.search(r"\b(\d{5,6})\b", plain)
     if m:
         return m.group(1)
     return None
@@ -112,6 +119,37 @@ def is_glados_mail(from_: str, subject: str, text: str, html: str) -> bool:
             or "authentication code" in blob):
         return True
     return False
+
+
+# ============ 邮件时间解析（排序用） ============
+_EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
+
+
+def _mail_datetime(msg) -> datetime:
+    """解析邮件 Date 头；失败返回 epoch。"""
+    try:
+        raw = msg.get("Date")
+        if not raw:
+            return _EPOCH
+        dt = parsedate_to_datetime(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return _EPOCH
+
+
+def _imap_tools_msg_datetime(msg) -> datetime:
+    """imap-tools MailMessage.date -> datetime；失败返回 epoch。"""
+    try:
+        dt = msg.date
+        if dt is None:
+            return _EPOCH
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return _EPOCH
 
 
 # ============ 网易 126/163：imaplib + ID ============
@@ -170,6 +208,7 @@ def _scan_netease(user: str, password: str, host: str,
     try:
         mail.login(user, password)
 
+        # 关键：发送 IMAP ID，规避 "Unsafe Login"
         args = ("name", "GladosMailLib", "version", "1.0",
                 "vendor", "myclient", "support-email", user)
         try:
@@ -188,19 +227,25 @@ def _scan_netease(user: str, password: str, host: str,
             return None
 
         ids = data[0].split()[-fetch_limit:]
-        log(f"[INFO] INBOX 取最近 {len(ids)} 封")
 
-        for num in reversed(ids):
+        # 先拉取，再按 Date 头倒序
+        parsed = []
+        for num in ids:
             typ, msg_data = mail.fetch(num, "(RFC822)")
             if typ != "OK" or not msg_data or not msg_data[0]:
                 continue
             msg = email.message_from_bytes(msg_data[0][1])
+            parsed.append((_mail_datetime(msg), msg))
 
+        parsed.sort(key=lambda x: x[0], reverse=True)
+        log(f"[INFO] INBOX 取 {len(parsed)} 封，已按时间倒序")
+
+        for dt, msg in parsed:
             subject = _decode_mime_header(msg.get("Subject", ""))
             from_ = _decode_mime_header(msg.get("From", ""))
             text, html = _extract_body(msg)
-            log(f"[DEBUG] from={from_!r} subject={subject!r} "
-                f"text_len={len(text)} html_len={len(html)}")
+            log(f"[DEBUG] date={dt.isoformat()} from={from_!r} "
+                f"subject={subject!r} text_len={len(text)} html_len={len(html)}")
 
             if not is_glados_mail(from_, subject, text, html):
                 continue
@@ -242,13 +287,17 @@ def _scan_imap_tools(user: str, password: str, host: str,
                 log(f"[WARN] 拉取 {folder!r} 失败: {e}")
                 continue
 
-            log(f"[INFO] 文件夹 {folder!r} 拉到 {len(msgs)} 封")
+            # 按邮件时间倒序（不依赖 fetch 顺序）
+            msgs.sort(key=_imap_tools_msg_datetime, reverse=True)
+            log(f"[INFO] 文件夹 {folder!r} 拉到 {len(msgs)} 封，已按时间倒序")
+
             for msg in msgs:
                 from_ = msg.from_ or ""
                 subject = msg.subject or ""
                 text = msg.text or ""
                 html = msg.html or ""
-                log(f"[DEBUG] from={from_!r} subject={subject!r} "
+                log(f"[DEBUG] date={_imap_tools_msg_datetime(msg).isoformat()} "
+                    f"from={from_!r} subject={subject!r} "
                     f"text_len={len(text)} html_len={len(html)}")
 
                 if not is_glados_mail(from_, subject, text, html):
@@ -281,7 +330,7 @@ def fetch_glados_code(
     verbose: bool = False,
 ) -> Optional[str]:
     """
-    轮询收取 GLaDOS 验证码。
+    轮询收取 GLaDOS 验证码（按邮件时间取最新，支持 5~6 位）。
 
     :param user: 邮箱完整地址
     :param password: 授权码 / 应用专用密码
@@ -290,7 +339,7 @@ def fetch_glados_code(
     :param poll_interval: 轮询间隔秒数
     :param fetch_limit: 每次取最近多少封邮件
     :param verbose: 是否打印调试日志
-    :return: 6 位验证码字符串，超时返回 None
+    :return: 5~6 位验证码字符串，超时返回 None
     """
     if not host:
         host = resolve_imap_host(user)
