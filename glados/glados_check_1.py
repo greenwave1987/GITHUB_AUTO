@@ -8,9 +8,12 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 from nacl import encoding, public
 from playwright.sync_api import sync_playwright
-from engine.main import ConfigReader
+
 from glados_mail import fetch_glados_code
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
+from engine.main import ConfigReader
 # ================= 配置 =================
 HOST = 'glados.cloud'
 ENV_NAME = 'GLADOS'
