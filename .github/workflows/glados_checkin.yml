@@ -34,6 +34,7 @@ jobs:
           GLADOS_LOCAL: ${{ secrets.GLADOS_LOCAL }}
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          CONFIG_PASSWORD: ${{ secrets.CONFIG_PASSWORD }}
         run: |
           python -u glados/glados_check_1.py
       - name: 🧹 清理旧的工作流运行记录
