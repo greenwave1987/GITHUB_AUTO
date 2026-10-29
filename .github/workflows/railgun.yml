@@ -23,7 +23,7 @@ jobs:
       - name: Install deps
         run: |
           python -u -m pip install --upgrade pip
-          python -u -m pip install playwright requests pynacl matplotlib
+          python -u -m pip install playwright requests pynacl matplotlib  imap-tools cryptography
           python -u -m playwright install chromium
 
       - name: Run RailGun auto login & checkin
@@ -34,6 +34,7 @@ jobs:
           RAILGUN_LOCAL: ${{ secrets.RAILGUN_LOCAL }}
           REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          CONFIG_PASSWORD: ${{ secrets.CONFIG_PASSWORD }}
         run: |
           python -u railgun/railgun_1.py
 
