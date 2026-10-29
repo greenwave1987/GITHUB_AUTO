@@ -6,11 +6,17 @@ GLaDOS 验证码收取模块（可被任意 Python 项目 import）。
 用法：
     from glados_mail import fetch_glados_code
 
+    # 默认：只看今日邮件，最多尝试 4 次，每次间隔 60 秒
     code = fetch_glados_code("a@126.com", "授权码")
     print(code)   # 5~6 位字符串，或 None
 
-    # 也可手动指定服务器
-    code = fetch_glados_code("x@corp.com", "pwd", host="mail.corp.com")
+    # 也可手动指定服务器 / 关闭今日过滤 / 调整轮询
+    code = fetch_glados_code(
+        "x@corp.com", "pwd",
+        host="mail.corp.com",
+        today_only=False,
+        poll_interval=30, max_attempts=6,
+    )
 """
 from __future__ import annotations
 
@@ -152,6 +158,18 @@ def _imap_tools_msg_datetime(msg) -> datetime:
         return _EPOCH
 
 
+# ★ 新增：判断某封邮件是否属于"今日"（按本地时区）
+def _is_today(dt: datetime) -> bool:
+    if dt is None:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    now_local = datetime.now().astimezone()
+    today_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    # 统一到本地时区比较
+    return dt.astimezone(now_local.tzinfo) >= today_start_local
+
+
 # ============ 网易 126/163：imaplib + ID ============
 imaplib.Commands["ID"] = ("AUTH",)
 
@@ -199,7 +217,8 @@ def _extract_body(msg) -> tuple[str, str]:
 
 
 def _scan_netease(user: str, password: str, host: str,
-                  fetch_limit: int, verbose: bool) -> Optional[str]:
+                  fetch_limit: int, verbose: bool,
+                  today_only: bool = True) -> Optional[str]:
     def log(*a):
         if verbose:
             print(*a)
@@ -221,9 +240,15 @@ def _scan_netease(user: str, password: str, host: str,
             log(f"[WARN] 选择 INBOX 失败: {dat}")
             return None
 
-        typ, data = mail.search(None, "ALL")
+        # ★ 关键：用 SINCE 只搜今日邮件（IMAP 规范要求 %d-%b-%Y 格式）
+        if today_only:
+            since = datetime.now().strftime("%d-%b-%Y")
+            typ, data = mail.search(None, f"(SINCE {since})")
+        else:
+            typ, data = mail.search(None, "ALL")
+
         if typ != "OK" or not data or not data[0]:
-            log("[INFO] INBOX 无邮件")
+            log("[INFO] 今日 INBOX 无邮件" if today_only else "[INFO] INBOX 无邮件")
             return None
 
         ids = data[0].split()[-fetch_limit:]
@@ -235,10 +260,14 @@ def _scan_netease(user: str, password: str, host: str,
             if typ != "OK" or not msg_data or not msg_data[0]:
                 continue
             msg = email.message_from_bytes(msg_data[0][1])
-            parsed.append((_mail_datetime(msg), msg))
+            dt = _mail_datetime(msg)
+            # ★ 二次过滤：SINCE 只到"天"粒度，跨时区可能带入昨天，再判一次
+            if today_only and not _is_today(dt):
+                continue
+            parsed.append((dt, msg))
 
         parsed.sort(key=lambda x: x[0], reverse=True)
-        log(f"[INFO] INBOX 取 {len(parsed)} 封，已按时间倒序")
+        log(f"[INFO] {'今日' if today_only else 'INBOX'} 取 {len(parsed)} 封，已按时间倒序")
 
         for dt, msg in parsed:
             subject = _decode_mime_header(msg.get("Subject", ""))
@@ -262,7 +291,8 @@ def _scan_netease(user: str, password: str, host: str,
 
 # ============ Gmail / QQ：imap-tools ============
 def _scan_imap_tools(user: str, password: str, host: str,
-                     fetch_limit: int, verbose: bool) -> Optional[str]:
+                     fetch_limit: int, verbose: bool,
+                     today_only: bool = True) -> Optional[str]:
     if MailBox is None:
         raise RuntimeError("未安装 imap-tools，请先 pip install imap-tools")
 
@@ -273,6 +303,9 @@ def _scan_imap_tools(user: str, password: str, host: str,
     folders = (["[Gmail]/All Mail", "[Gmail]/所有邮件", "INBOX"]
                if _is_gmail(host) else ["INBOX"])
 
+    # ★ 今日的 IMAP 日期串
+    since_str = datetime.now().strftime("%d-%b-%Y") if today_only else None
+
     with MailBox(host).login(user, password) as mailbox:
         for folder in folders:
             try:
@@ -282,14 +315,18 @@ def _scan_imap_tools(user: str, password: str, host: str,
                 continue
 
             try:
-                msgs = list(mailbox.fetch("ALL", reverse=True, limit=fetch_limit))
+                criteria = f"(SINCE {since_str})" if since_str else "ALL"
+                msgs = list(mailbox.fetch(criteria, reverse=True, limit=fetch_limit))
             except Exception as e:
                 log(f"[WARN] 拉取 {folder!r} 失败: {e}")
                 continue
 
-            # 按邮件时间倒序（不依赖 fetch 顺序）
+            # ★ 二次按邮件时间过滤今日 + 倒序
+            if today_only:
+                msgs = [m for m in msgs if _is_today(_imap_tools_msg_datetime(m))]
             msgs.sort(key=_imap_tools_msg_datetime, reverse=True)
-            log(f"[INFO] 文件夹 {folder!r} 拉到 {len(msgs)} 封，已按时间倒序")
+            log(f"[INFO] 文件夹 {folder!r} {'今日' if today_only else ''}拉到 "
+                f"{len(msgs)} 封，已按时间倒序")
 
             for msg in msgs:
                 from_ = msg.from_ or ""
@@ -310,13 +347,14 @@ def _scan_imap_tools(user: str, password: str, host: str,
 
 # ============ 公开 API ============
 def scan_once(user: str, password: str, host: Optional[str] = None,
-              fetch_limit: int = 20, verbose: bool = False) -> Optional[str]:
+              fetch_limit: int = 20, verbose: bool = False,
+              today_only: bool = True) -> Optional[str]:
     """扫描一次，返回验证码或 None。host 省略时按邮箱域名自动推断。"""
     if not host:
         host = resolve_imap_host(user)
     if _is_netease(host):
-        return _scan_netease(user, password, host, fetch_limit, verbose)
-    return _scan_imap_tools(user, password, host, fetch_limit, verbose)
+        return _scan_netease(user, password, host, fetch_limit, verbose, today_only)
+    return _scan_imap_tools(user, password, host, fetch_limit, verbose, today_only)
 
 
 def fetch_glados_code(
@@ -324,36 +362,63 @@ def fetch_glados_code(
     password: str,
     host: Optional[str] = None,
     *,
-    max_wait: int = 120,
-    poll_interval: int = 10,
+    poll_interval: int = 60,     # ★ 每次扫描间隔（秒）
+    max_attempts: int = 4,       # ★ 最多扫描次数
     fetch_limit: int = 20,
     verbose: bool = False,
+    today_only: bool = True,     # ★ 只匹配今日邮件
+    max_wait: Optional[int] = None,  # ★ 兼容旧参数；None 则用 poll_interval*max_attempts
+    first_scan_immediate: bool = False,  # ★ 首次是否立即扫（False=先等 60s）
 ) -> Optional[str]:
     """
-    轮询收取 GLaDOS 验证码（按邮件时间取最新，支持 5~6 位）。
+    轮询收取 GLaDOS 验证码（只看今日邮件，5~6 位）。
+
+    语义（默认 first_scan_immediate=False）：
+        - 每次扫描前先等待 poll_interval 秒
+        - 最多尝试 max_attempts 次（默认 4 次）
+        - 全部失败返回 None
+
+    若 first_scan_immediate=True：
+        - 第 1 次立刻扫；之后每次间隔 poll_interval；共 max_attempts 次
 
     :param user: 邮箱完整地址
     :param password: 授权码 / 应用专用密码
     :param host: IMAP 服务器；省略则按邮箱域名自动推断
-    :param max_wait: 最长等待秒数（0 表示只扫一次）
-    :param poll_interval: 轮询间隔秒数
+    :param poll_interval: 轮询间隔秒数（默认 60）
+    :param max_attempts: 最多扫描次数（默认 4）
     :param fetch_limit: 每次取最近多少封邮件
     :param verbose: 是否打印调试日志
-    :return: 5~6 位验证码字符串，超时返回 None
+    :param today_only: 只匹配今天收到的邮件（默认 True）
+    :param max_wait: 兼容旧参数；若给出则按总超时秒数截断
+    :param first_scan_immediate: 首次是否立即扫描（默认 False）
+    :return: 5~6 位验证码字符串，超时/全部失败返回 None
     """
     if not host:
         host = resolve_imap_host(user)
     if verbose:
-        print(f"[INFO] 使用 IMAP 主机: {host}")
+        print(f"[INFO] IMAP 主机: {host}, today_only={today_only}, "
+              f"max_attempts={max_attempts}, poll_interval={poll_interval}s, "
+              f"first_scan_immediate={first_scan_immediate}")
 
-    deadline = time.time() + max_wait
-    attempt = 0
-    while True:
-        attempt += 1
+    deadline = None
+    if max_wait is not None and max_wait > 0:
+        deadline = time.time() + max_wait
+
+    for attempt in range(1, max_attempts + 1):
+        # ★ 首次是否等待
+        if attempt > 1 or not first_scan_immediate:
+            if verbose:
+                print(f"[INFO] 等待 {poll_interval}s 后第 {attempt} 次扫描...")
+            time.sleep(poll_interval)
+
         if verbose:
-            print(f"[INFO] 第 {attempt} 次扫描...")
+            print(f"[INFO] 第 {attempt}/{max_attempts} 次扫描...")
+
         try:
-            code = scan_once(user, password, host, fetch_limit, verbose)
+            code = scan_once(
+                user, password, host, fetch_limit, verbose,
+                today_only=today_only,
+            )
         except Exception as e:
             if verbose:
                 print(f"[ERROR] 扫描异常: {e}")
@@ -364,8 +429,11 @@ def fetch_glados_code(
                 print(f"✅ 找到验证码: {code}")
             return code
 
-        if time.time() >= deadline:
+        if deadline is not None and time.time() >= deadline:
             if verbose:
-                print("❌ 超时未找到验证码")
+                print("❌ 达到 max_wait 超时，停止")
             return None
-        time.sleep(poll_interval)
+
+    if verbose:
+        print(f"❌ {max_attempts} 次扫描均未找到验证码，返回 None")
+    return None
