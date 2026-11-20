@@ -385,7 +385,7 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         for index, email in enumerate(EMAILS):
-            if index := 1:
+            if index != 1:
                 print(f"跳过账号...")
                 continue
             if index > 0:
