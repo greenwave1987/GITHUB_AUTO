@@ -287,6 +287,7 @@ def process_account(browser, email, current_storage,email_info):
 
         # ---------- 执行签到 ----------
         checkin_res = api_fetch(page, API_MAP["checkin"], "POST", {"token": HOST})
+        print(checkin_res)
         checkin_msg = "✅ 签到成功" if checkin_res.get("code") == 0 else "⚠️ 今日已签到"
 
         # ---------- 重新获取状态 ----------
@@ -385,7 +386,7 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
         for index, email in enumerate(EMAILS):
-            if index != 0:
+            if index != 3:
                 print(f"跳过账号...")
                 continue
             if index > 0:
